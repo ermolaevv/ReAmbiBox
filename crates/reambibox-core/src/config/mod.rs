@@ -24,6 +24,10 @@ pub struct AppConfig {
     pub color_order: String,
     #[serde(default = "default_static_color")]
     pub static_color: [u8; 3],
+    #[serde(default = "default_audio_effect")]
+    pub audio_effect: String,
+    #[serde(default = "default_audio_sensitivity")]
+    pub audio_sensitivity: f32,
     #[serde(default)]
     pub hotkeys: HotkeysConfig,
     pub zones: Vec<Zone>,
@@ -91,6 +95,14 @@ fn default_static_color() -> [u8; 3] {
     [255, 255, 255]
 }
 
+fn default_audio_effect() -> String {
+    "pulse".to_string()
+}
+
+fn default_audio_sensitivity() -> f32 {
+    1.0
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         let led_count = 60;
@@ -109,6 +121,8 @@ impl Default for AppConfig {
             mode: default_mode(),
             color_order: default_color_order(),
             static_color: default_static_color(),
+            audio_effect: default_audio_effect(),
+            audio_sensitivity: default_audio_sensitivity(),
             hotkeys: HotkeysConfig::default(),
             zones,
         }

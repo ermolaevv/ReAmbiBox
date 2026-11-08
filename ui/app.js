@@ -18,6 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnModeToggle = document.getElementById('btn-mode-toggle');
   const btnModeScreen = document.getElementById('btn-mode-screen');
   const btnModeStatic = document.getElementById('btn-mode-static');
+  const btnModeMusic = document.getElementById('btn-mode-music');
+  const cardMusicSettings = document.getElementById('card-music-settings');
+  const selectAudioEffect = document.getElementById('select-audio-effect');
+  const sliderAudioSensitivity = document.getElementById('slider-audio-sensitivity');
+  const valAudioSensitivity = document.getElementById('val-audio-sensitivity');
 
   const sliderBrightness = document.getElementById('slider-brightness');
   const valBrightness = document.getElementById('val-brightness');
@@ -142,17 +147,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Переключение режимов
   function setMode(mode) {
+    btnModeScreen?.classList.remove('btn-primary');
+    btnModeScreen?.classList.add('btn-secondary');
+    btnModeStatic?.classList.remove('btn-primary');
+    btnModeStatic?.classList.add('btn-secondary');
+    btnModeMusic?.classList.remove('btn-primary');
+    btnModeMusic?.classList.add('btn-secondary');
+
+    if (cardMusicSettings) {
+      cardMusicSettings.style.display = (mode === 'music') ? 'block' : 'none';
+    }
+
     if (mode === 'static') {
       btnModeStatic?.classList.remove('btn-secondary');
       btnModeStatic?.classList.add('btn-primary');
-      btnModeScreen?.classList.remove('btn-primary');
-      btnModeScreen?.classList.add('btn-secondary');
-      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Захват экрана';
+      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Экран';
+    } else if (mode === 'music') {
+      btnModeMusic?.classList.remove('btn-secondary');
+      btnModeMusic?.classList.add('btn-primary');
+      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Экран';
     } else {
       btnModeScreen?.classList.remove('btn-secondary');
       btnModeScreen?.classList.add('btn-primary');
-      btnModeStatic?.classList.remove('btn-primary');
-      btnModeStatic?.classList.add('btn-secondary');
       if (btnModeToggle) btnModeToggle.textContent = 'Тест белым (100% LED)';
     }
     queueConfigUpdate({ mode });
@@ -160,6 +176,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnModeScreen?.addEventListener('click', () => setMode('screen'));
   btnModeStatic?.addEventListener('click', () => setMode('static'));
+  btnModeMusic?.addEventListener('click', () => setMode('music'));
+
+  selectAudioEffect?.addEventListener('change', (e) => {
+    queueConfigUpdate({ audio_effect: e.target.value });
+  });
+
+  sliderAudioSensitivity?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value) / 100.0;
+    if (valAudioSensitivity) valAudioSensitivity.textContent = val.toFixed(1) + 'x';
+    queueConfigUpdate({ audio_sensitivity: val });
+  });
 
   btnModeToggle?.addEventListener('click', () => {
     if (!currentConfig) return;
@@ -514,6 +541,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // Заполняем порядок цветов
         if (selectColorOrder && data.color_order) {
           selectColorOrder.value = data.color_order;
+        }
+
+        // Заполняем настройки светомузыки
+        if (selectAudioEffect && data.audio_effect) {
+          selectAudioEffect.value = data.audio_effect;
+        }
+        if (sliderAudioSensitivity && data.audio_sensitivity) {
+          sliderAudioSensitivity.value = Math.round(data.audio_sensitivity * 100);
+          if (valAudioSensitivity) valAudioSensitivity.textContent = (data.audio_sensitivity).toFixed(1) + 'x';
         }
 
         // Заполняем горячие клавиши

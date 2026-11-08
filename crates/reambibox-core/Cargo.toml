@@ -6,7 +6,7 @@ authors = ["ReAmbiBox Authors"]
 description = "Core high-performance capture, color processing, and device driver engine for ReAmbiBox"
 
 [dependencies]
-# Windows API for DXGI Desktop Duplication & Direct3D 11
+# Windows API for DXGI Desktop Duplication, Direct3D 11, and WASAPI Audio
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
@@ -17,6 +17,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_StationsAndDesktops",
     "Win32_Security",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
 ] }
 
 # Serial communication (Adalight, AtmoLight, etc.)

@@ -7,4 +7,5 @@ pub mod color;
 pub mod capture;
 pub mod api;
 pub mod config;
+pub mod audio;
 

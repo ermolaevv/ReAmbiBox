@@ -38,6 +38,8 @@ struct ConfigUpdate {
     baud_rate: Option<u32>,
     serial_port: Option<String>,
     reconnect: Option<bool>,
+    audio_effect: Option<String>,
+    audio_sensitivity: Option<f32>,
     hotkeys: Option<HotkeysConfig>,
 }
 
@@ -65,6 +67,8 @@ struct ApiStatusResponse {
     mode: String,
     color_order: String,
     static_color: [u8; 3],
+    audio_effect: String,
+    audio_sensitivity: f32,
     selected_monitor: usize,
     monitors: Vec<ApiMonitorInfo>,
     led_count: usize,
@@ -300,18 +304,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // 5. Выделенный поток DXGI захвата экрана и цветового процессинга
+    // 5. Запуск фонового захвата системного звука (WASAPI Loopback)
+    let wasapi_bands = Arc::new(parking_lot::RwLock::new(reambibox_core::audio::AudioBands::default()));
+    let audio_capture = Arc::new(reambibox_core::audio::WasapiLoopbackCapture::new());
+    {
+        let bands_store = Arc::clone(&wasapi_bands);
+        audio_capture.start_capture(move |bands| {
+            *bands_store.write() = bands;
+        });
+    }
+
+    // 6. Выделенный поток захвата экрана и цветового процессинга
     {
         let colors_ref = Arc::clone(&output_colors);
         let cfg_ref = Arc::clone(&shared_config);
         let fps_ref = Arc::clone(&capture_fps);
         let run_ref = Arc::clone(&is_running);
         let tray_ref = Arc::clone(&tray_manager);
+        let bands_ref = Arc::clone(&wasapi_bands);
 
         std::thread::spawn(move || {
             let mut current_mon: usize = 99999;
             let mut capture: Option<DxgiCapture> = None;
             let mut smoother = TemporalSmoother::new();
+            let mut music_vis = reambibox_core::audio::MusicVisualizer::new();
             let mut last_sampled: Vec<RgbColor> = Vec::new();
             let mut frames_count: u64 = 0;
             let mut last_fps_time = Instant::now();
@@ -367,6 +383,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         last_fps_time = Instant::now();
                     }
                     std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+
+                // Обработка режима: Светомузыка (Audio Reactive / Music Visualizer)
+                if mode == "music" {
+                    let bands = *bands_ref.read();
+                    let (effect, sens) = {
+                        let c = cfg_ref.read();
+                        (c.audio_effect.clone(), c.audio_sensitivity)
+                    };
+                    let raw_leds = music_vis.render(bands, led_count, &effect, sens);
+                    let processed: Vec<RgbColor> = raw_leds
+                        .into_iter()
+                        .map(|c| c.with_brightness_gamma(brightness, gamma))
+                        .collect();
+                    {
+                        let mut out = colors_ref.write();
+                        *out = processed;
+                    }
+                    frames_count += 1;
+                    if last_fps_time.elapsed() >= Duration::from_secs(1) {
+                        *fps_ref.write() = (frames_count as f64 / last_fps_time.elapsed().as_secs_f64()) as f32;
+                        frames_count = 0;
+                        last_fps_time = Instant::now();
+                    }
+                    std::thread::sleep(Duration::from_millis(16));
                     continue;
                 }
 
@@ -555,6 +597,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         mode: cfg.mode.clone(),
                         color_order: cfg.color_order.clone(),
                         static_color: cfg.static_color,
+                        audio_effect: cfg.audio_effect.clone(),
+                        audio_sensitivity: cfg.audio_sensitivity,
                         selected_monitor: cfg.selected_monitor,
                         monitors,
                         led_count: cfg.zones.len(),
@@ -654,6 +698,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(m) = update.mode {
                                 println!("[API] Режим изменен на: {}", m);
                                 cfg.mode = m;
+                            }
+                            if let Some(eff) = update.audio_effect {
+                                println!("[API] Эффект светомузыки: {}", eff);
+                                cfg.audio_effect = eff;
+                            }
+                            if let Some(sens) = update.audio_sensitivity {
+                                println!("[API] Чувствительность светомузыки: {:.2}", sens);
+                                cfg.audio_sensitivity = sens;
                             }
                             if let Some(order) = update.color_order {
                                 println!("[API] Порядок цветов: {}", order);
