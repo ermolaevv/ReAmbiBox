@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/reambibox-core",
+    "crates/reambibox-app",
+]
+resolver = "2"
+
