@@ -108,8 +108,11 @@ unsafe fn setup_shutdown_handlers(port: String, baud: u32, leds: usize) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Подключение к консоли (при --console или в debug-сборке)
+    // Включение Per-Monitor DPI Awareness v2 для устранения виртуализации разрешений и масштабирования Windows
     unsafe {
+        let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
         init_console_support();
     }
 

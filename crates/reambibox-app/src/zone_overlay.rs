@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor, SetLayeredWindowAttributes,
     SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HTCLIENT, HWND_TOPMOST, IDC_ARROW,
     IDC_SIZEALL, IDC_SIZENWSE, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
-    SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOW, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
+    SW_HIDE, SW_SHOW, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
     WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
@@ -183,11 +183,36 @@ unsafe extern "system" fn overlay_wnd_proc(
                 state.is_visible.store(next, Ordering::Relaxed);
 
                 if next {
+                    // Вычисляем физические координаты и разрешение выбранного монитора
+                    let target_mon_idx = state.config.read().selected_monitor;
+                    let monitors = reambibox_core::capture::dxgi::DxgiCapture::list_monitors();
+                    let (mon_x, mon_y, mon_w, mon_h) = if let Some(m) = monitors.iter().find(|m| m.index == target_mon_idx) {
+                        (m.x, m.y, m.width as i32, m.height as i32)
+                    } else if let Some(m) = monitors.first() {
+                        (m.x, m.y, m.width as i32, m.height as i32)
+                    } else {
+                        (0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+                    };
+
+                    state.screen_width = mon_w;
+                    state.screen_height = mon_h;
+
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        mon_x,
+                        mon_y,
+                        mon_w,
+                        mon_h,
+                        windows::Win32::UI::WindowsAndMessaging::SWP_SHOWWINDOW,
+                    );
                     let _ = ShowWindow(hwnd, SW_SHOW);
-                    let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                     let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
                     let _ = InvalidateRect(hwnd, None, true);
-                    println!("[Overlay] Нативный экранный оверлей зон: АКТИВЕН");
+                    println!(
+                        "[Overlay] Нативный экранный оверлей зон: АКТИВЕН на мониторе {} ({}x{} в {},{})",
+                        target_mon_idx, mon_w, mon_h, mon_x, mon_y
+                    );
                 } else {
                     let _ = ShowWindow(hwnd, SW_HIDE);
                     println!("[Overlay] Нативный экранный оверлей зон: СКРЫТ (зоны сохранены)");

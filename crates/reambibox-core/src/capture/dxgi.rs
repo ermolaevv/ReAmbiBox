@@ -1,6 +1,6 @@
 use std::time::Duration;
 use thiserror::Error;
-use windows::core::Interface;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
@@ -14,6 +14,7 @@ use windows::Win32::Graphics::Dxgi::{
     IDXGIOutputDuplication, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT,
     DXGI_OUTDUPL_FRAME_INFO,
 };
+use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS};
 use windows::Win32::System::StationsAndDesktops::{
     OpenInputDesktop, SetThreadDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
 };
@@ -51,6 +52,8 @@ pub struct MonitorInfo {
     pub index: usize,
     pub adapter_name: String,
     pub output_name: String,
+    pub x: i32,
+    pub y: i32,
     pub width: u32,
     pub height: u32,
     pub is_primary: bool,
@@ -99,14 +102,31 @@ impl DxgiCapture {
                         let output_name = String::from_utf16_lossy(&desc.DeviceName)
                             .trim_matches(char::from(0))
                             .to_string();
-                        let width = (desc.DesktopCoordinates.right - desc.DesktopCoordinates.left) as u32;
-                        let height = (desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top) as u32;
+
+                        // Считываем физическое аппаратное разрешение монитора из Windows (без искажений DPI-масштабирования)
+                        let mut devmode = DEVMODEW::default();
+                        devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+                        let (width, height) = if EnumDisplaySettingsW(
+                            PCWSTR(desc.DeviceName.as_ptr()),
+                            ENUM_CURRENT_SETTINGS,
+                            &mut devmode,
+                        ).as_bool() {
+                            (devmode.dmPelsWidth, devmode.dmPelsHeight)
+                        } else {
+                            (
+                                (desc.DesktopCoordinates.right - desc.DesktopCoordinates.left) as u32,
+                                (desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top) as u32,
+                            )
+                        };
+
                         let is_primary = desc.DesktopCoordinates.left == 0 && desc.DesktopCoordinates.top == 0;
 
                         list.push(MonitorInfo {
                             index: monitor_idx,
                             adapter_name: adapter_name.clone(),
                             output_name,
+                            x: desc.DesktopCoordinates.left,
+                            y: desc.DesktopCoordinates.top,
                             width,
                             height,
                             is_primary,
@@ -188,8 +208,25 @@ impl DxgiCapture {
             let duplication = output1.DuplicateOutput(&device)?;
 
             let desc = output.GetDesc()?;
-            let width = (desc.DesktopCoordinates.right - desc.DesktopCoordinates.left) as u32;
-            let height = (desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top) as u32;
+            let dupl_desc = duplication.GetDesc();
+            let (width, height) = if dupl_desc.ModeDesc.Width > 0 && dupl_desc.ModeDesc.Height > 0 {
+                (dupl_desc.ModeDesc.Width, dupl_desc.ModeDesc.Height)
+            } else {
+                let mut devmode = DEVMODEW::default();
+                devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+                if EnumDisplaySettingsW(
+                    PCWSTR(desc.DeviceName.as_ptr()),
+                    ENUM_CURRENT_SETTINGS,
+                    &mut devmode,
+                ).as_bool() {
+                    (devmode.dmPelsWidth, devmode.dmPelsHeight)
+                } else {
+                    (
+                        (desc.DesktopCoordinates.right - desc.DesktopCoordinates.left) as u32,
+                        (desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top) as u32,
+                    )
+                }
+            };
 
             Ok(Self {
                 monitor_index,
