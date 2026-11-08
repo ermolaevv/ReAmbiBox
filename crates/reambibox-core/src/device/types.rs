@@ -106,3 +106,4 @@ mod tests {
         assert_eq!(frame.colors, colors);
     }
 }
+

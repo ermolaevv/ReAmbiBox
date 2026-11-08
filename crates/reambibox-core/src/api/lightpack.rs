@@ -210,3 +210,4 @@ mod tests {
         assert_eq!(s.manual_colors[0], RgbColor::new(255, 128, 64));
     }
 }
+

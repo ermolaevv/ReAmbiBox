@@ -8,6 +8,7 @@ description = "ReAmbiBox Application Entry Point"
 [dependencies]
 reambibox-core = { path = "../reambibox-core" }
 tokio = { version = "1", features = ["full"] }
+parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1.0"

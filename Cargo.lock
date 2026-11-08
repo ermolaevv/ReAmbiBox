@@ -293,6 +293,7 @@ name = "reambibox-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "parking_lot",
  "reambibox-core",
  "tokio",
  "tracing",

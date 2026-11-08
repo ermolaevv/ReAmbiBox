@@ -77,3 +77,4 @@ mod tests {
         assert_eq!(out3[0], RgbColor::new(191, 191, 191));
     }
 }
+

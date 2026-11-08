@@ -36,3 +36,4 @@ pub trait DeviceDriver: Send {
     /// Отправка очередного кадра цветов
     fn send_frame(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError>;
 }
+

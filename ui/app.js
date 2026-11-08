@@ -90,3 +90,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
   generateZones(20, 20, 10, 10);
 });
+

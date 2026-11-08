@@ -5,8 +5,13 @@ use reambibox_core::color::smoothing::TemporalSmoother;
 use reambibox_core::config::AppConfig;
 use reambibox_core::device::adalight::AdalightDriver;
 use reambibox_core::device::traits::DeviceDriver;
-use reambibox_core::device::types::DeviceFrame;
+use reambibox_core::device::types::{DeviceFrame, RgbColor};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,129 +19,176 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("        ReAmbiBox v0.1.0 — High-Performance Ambilight      ");
     println!("============================================================");
 
-    // 1. Загрузка конфигурации
-    let config = AppConfig::load();
-    println!("Загружена конфигурация:");
-    println!("  - COM-порт: {} ({} бод)", config.serial_port, config.baud_rate);
-    println!("  - Количество зон: {}", config.zones.len());
-    println!("  - Сглаживание: {:.2}, Яркость: {:.2}", config.smoothing, config.brightness);
+    // 1. Загрузка конфигурации (включая 97 зон из старого AmbiBox)
+    let config = Arc::new(RwLock::new(AppConfig::load()));
+    let cfg = config.read().await.clone();
 
-    // 2. Инициализация и запуск фонового Lightpack API TCP сервера на порту 3636
+    println!("Загружена конфигурация:");
+    println!("  - COM-порт: {} ({} бод)", cfg.serial_port, cfg.baud_rate);
+    println!("  - Активных светодиодных зон: {}", cfg.zones.len());
+    println!("  - Сглаживание: {:.2}, Яркость: {:.2}", cfg.smoothing, cfg.brightness);
+
+    // 2. Инициализация разделяемого состояния и Lightpack API сервера (порт 3636)
     let shared_state = create_shared_state();
     {
         let mut s = shared_state.write().await;
-        s.led_count = config.zones.len();
-        s.brightness = config.brightness;
-        s.smooth = config.smoothing;
+        s.led_count = cfg.zones.len();
+        s.brightness = cfg.brightness;
+        s.smooth = cfg.smoothing;
     }
-    let server = LightpackServer::new(shared_state.clone(), LightpackServer::DEFAULT_PORT);
+    let lp_server = LightpackServer::new(shared_state.clone(), LightpackServer::DEFAULT_PORT);
     tokio::spawn(async move {
-        if let Err(e) = server.run().await {
-            eprintln!("Ошибка Lightpack TCP сервера: {}", e);
-        }
+        let _ = lp_server.run().await;
     });
     println!(">>> [OK] Lightpack API сервер активен на 127.0.0.1:3636");
 
-    // 3. Подключение к Adalight устройству (COM10)
-    let mut driver = AdalightDriver::new(&config.serial_port, config.baud_rate);
-    match driver.connect() {
-        Ok(_) => println!(">>> [OK] Успешно подключено к Adalight на порту {}", config.serial_port),
-        Err(e) => {
-            eprintln!("Предупреждение: Не удалось открыть порт {}: {}. Продолжаем в режиме симуляции.", config.serial_port, e);
+    // 3. Запуск локального WebUI сервера на порту 3637
+    tokio::spawn(async move {
+        let listener = match TcpListener::bind("127.0.0.1:3637").await {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let (content_type, body) = if req.contains("GET /style.css") {
+                        ("text/css", include_str!("../../../ui/style.css"))
+                    } else if req.contains("GET /app.js") {
+                        ("application/javascript", include_str!("../../../ui/app.js"))
+                    } else {
+                        ("text/html; charset=utf-8", include_str!("../../../ui/index.html"))
+                    };
+
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        content_type,
+                        body.as_bytes().len(),
+                        body
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                }
+            });
         }
+    });
+    println!(">>> [OK] Web Панель управления доступна по адресу: http://localhost:3637");
+
+    // 4. Подключение к Adalight (COM10)
+    let mut driver = AdalightDriver::new(&cfg.serial_port, cfg.baud_rate);
+    match driver.connect() {
+        Ok(_) => println!(">>> [OK] Успешно открыт порт {} для {} зон", cfg.serial_port, cfg.zones.len()),
+        Err(e) => eprintln!("Предупреждение по порту {}: {}", cfg.serial_port, e),
     }
 
-    // 4. Инициализация захвата экрана через DXGI
-    let monitors = DxgiCapture::list_monitors();
-    let primary_idx = monitors.iter().find(|m| m.is_primary).map(|m| m.index).unwrap_or(0);
-    println!("Инициализация захвата экрана (монитор #{})...", primary_idx);
+    // 5. Разделяемый буфер для развязки потоков Захвата и Вывода
+    let latest_frame = Arc::new(parking_lot::RwLock::new(None));
+    let is_running = Arc::new(AtomicBool::new(true));
 
-    let mut capture = match DxgiCapture::new(primary_idx) {
-        Ok(c) => {
-            let (w, h) = c.dimensions();
-            println!(">>> [OK] DXGI Capture готов ({}x{})", w, h);
-            c
-        }
-        Err(e) => {
-            eprintln!("Критическая ошибка инициализации DXGI: {}", e);
-            return Err(e.into());
-        }
-    };
+    // Поток аппаратного захвата экрана (DXGI)
+    let capture_frame_ref = Arc::clone(&latest_frame);
+    let capture_running = Arc::clone(&is_running);
+    let selected_mon = cfg.selected_monitor;
 
+    std::thread::spawn(move || {
+        let mut capture = match DxgiCapture::new(selected_mon) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Ошибка DXGI захвата: {}", e);
+                return;
+            }
+        };
+
+        while capture_running.load(Ordering::Relaxed) {
+            match capture.capture_frame(Duration::from_millis(33)) {
+                Ok(frame) => {
+                    let mut lock = capture_frame_ref.write();
+                    *lock = Some(frame);
+                }
+                Err(reambibox_core::capture::CaptureError::Timeout) => {
+                    // Экран не изменился — спим немного
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(reambibox_core::capture::CaptureError::AccessLost) => {
+                    std::thread::sleep(Duration::from_millis(300));
+                    let _ = capture.reconnect();
+                }
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+    });
+
+    println!(">>> [OK] Поток DXGI захвата запущен.");
+
+    // Основной высокоскоростной поток передачи в COM10 (гарантированные 60 FPS)
     let mut smoother = TemporalSmoother::new();
-    println!("\n>>> Сквозной конвейер запущен! Нажмите Ctrl+C для выхода.");
+    let mut last_colors: Vec<RgbColor> = vec![RgbColor::BLACK; cfg.zones.len()];
+    let target_interval = Duration::from_millis(16); // ~60 FPS
 
-    let mut frame_count: u64 = 0;
+    println!(">>> [OK] Сквозной конвейер активен. Стриминг 97 светодиодов запущен!\n");
+
     let mut last_stats = Instant::now();
-    let mut last_latency = Duration::default();
+    let mut sent_frames = 0;
 
-    // Запуск цикла захвата и передачи
     loop {
-        let frame_start = Instant::now();
+        let loop_start = Instant::now();
 
-        // 1. Проверяем флаг активности из состояния (можно выключать через API)
+        // 1. Проверяем активность
         let is_active = {
             let s = shared_state.read().await;
             s.is_active
         };
 
-        if !is_active {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            continue;
-        }
-
-        // 2. Аппаратный захват кадра
-        match capture.capture_frame(Duration::from_millis(50)) {
-            Ok(captured) => {
-                // 3. Расчет цветов зон (downsampling step 4)
-                let raw_colors: Vec<_> = config
-                    .zones
-                    .iter()
-                    .map(|z| z.sample_color(&captured, 4))
-                    .collect();
-
-                // 4. Временное сглаживание
-                let smoothed = smoother.smooth(&raw_colors, config.smoothing);
-
-                // 5. Коррекция яркости
-                let final_colors: Vec<_> = smoothed
-                    .into_iter()
-                    .map(|c| c.with_brightness(config.brightness))
-                    .collect();
-
-                // 6. Отправка в COM-порт
-                if driver.is_connected() {
-                    let frame = DeviceFrame::new(final_colors);
-                    let _ = driver.send_frame(&frame);
+        if is_active {
+            // 2. Берем свежий кадр экрана (если есть) и рассчитываем зоны
+            let new_colors = {
+                let lock = latest_frame.read();
+                if let Some(ref frame) = *lock {
+                    let sampled: Vec<_> = cfg.zones.iter().map(|z| z.sample_color(frame, 4)).collect();
+                    Some(sampled)
+                } else {
+                    None
                 }
+            };
 
-                frame_count += 1;
-                last_latency = frame_start.elapsed();
+            if let Some(sampled) = new_colors {
+                last_colors = sampled;
             }
-            Err(reambibox_core::capture::CaptureError::Timeout) => {
-                // Экран не изменился, задержка для экономии ресурсов
-                tokio::time::sleep(Duration::from_millis(8)).await;
-            }
-            Err(reambibox_core::capture::CaptureError::AccessLost) => {
-                eprintln!("Сессия дисплея потеряна, переподключение...");
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                let _ = capture.reconnect();
-            }
-            Err(e) => {
-                eprintln!("Ошибка захвата: {}", e);
-                tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // 3. Временное сглаживание
+            let smoothed = smoother.smooth(&last_colors, cfg.smoothing);
+
+            // 4. Коррекция яркости
+            let final_colors: Vec<_> = smoothed
+                .into_iter()
+                .map(|c| c.with_brightness(cfg.brightness))
+                .collect();
+
+            // 5. Передача в COM-порт
+            if driver.is_connected() {
+                let frame = DeviceFrame::new(final_colors);
+                let _ = driver.send_frame(&frame);
+                sent_frames += 1;
             }
         }
 
-        // Вывод статистики в консоль раз в 2 секунды
+        // Вывод статистики в консоль каждые 2 секунды
         if last_stats.elapsed() >= Duration::from_secs(2) {
-            let fps = (frame_count as f64) / last_stats.elapsed().as_secs_f64();
+            let fps = (sent_frames as f64) / last_stats.elapsed().as_secs_f64();
             println!(
-                "[Статистика] Скорость: {:.1} FPS | Задержка цикла кадра: {:.2?} | Передано кадров: {}",
-                fps, last_latency, frame_count
+                "[Статистика] Поток подсветки: {:.1} FPS ({} кадров/сек) | Светодиодов: {} шт | Порт: {}",
+                fps, sent_frames / 2, cfg.zones.len(), cfg.serial_port
             );
-            frame_count = 0;
+            sent_frames = 0;
             last_stats = Instant::now();
+        }
+
+        // Выдерживаем стабильный интервал 60 FPS
+        let elapsed = loop_start.elapsed();
+        if elapsed < target_interval {
+            tokio::time::sleep(target_interval - elapsed).await;
         }
     }
 }

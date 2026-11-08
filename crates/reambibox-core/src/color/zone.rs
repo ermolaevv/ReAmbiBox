@@ -138,3 +138,4 @@ mod tests {
         assert_eq!(color, RgbColor::new(255, 0, 0));
     }
 }
+

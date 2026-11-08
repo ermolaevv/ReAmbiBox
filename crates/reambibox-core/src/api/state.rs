@@ -36,3 +36,4 @@ pub type SharedAppState = Arc<RwLock<AppState>>;
 pub fn create_shared_state() -> SharedAppState {
     Arc::new(RwLock::new(AppState::default()))
 }
+
