@@ -3,24 +3,24 @@ use reambibox_core::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use windows::core::w;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
     CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
-    InvalidateRect, Rectangle, SelectObject, SetBkMode, SetTextColor,
+    InvalidateRect, Rectangle, ScreenToClient, SelectObject, SetBkMode, SetTextColor,
     DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
     PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetSystemMetrics,
-    PostMessageW, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos,
-    ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, LWA_ALPHA, LWA_COLORKEY, MSG,
-    SM_CXSCREEN, SM_CYSCREEN, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOW,
-    WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_PAINT, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
+    LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor, SetLayeredWindowAttributes,
+    SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HTCLIENT, HWND_TOPMOST, IDC_ARROW,
+    IDC_SIZEALL, IDC_SIZENWSE, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOW, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
+    WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WM_TOGGLE_OVERLAY: u32 = WM_USER + 201;
@@ -98,6 +98,7 @@ impl ZoneOverlayManager {
                 style: CS_HREDRAW | CS_VREDRAW,
                 lpfnWndProc: Some(overlay_wnd_proc),
                 hInstance: instance.into(),
+                hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
                 lpszClassName: class_name,
                 ..Default::default()
             };
@@ -446,6 +447,44 @@ unsafe extern "system" fn overlay_wnd_proc(
                 }
             }
             LRESULT(0)
+        }
+
+        WM_SETCURSOR => {
+            let hit_test = (lparam.0 & 0xFFFF) as u32;
+            if hit_test == HTCLIENT {
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+                let _ = ScreenToClient(hwnd, &mut pt);
+
+                let mut cursor = IDC_ARROW;
+                if let Some(ref state) = *GLOBAL_OVERLAY.lock() {
+                    let screen_w = state.screen_width as f32;
+                    let screen_h = state.screen_height as f32;
+                    let px = pt.x as f32;
+                    let py = pt.y as f32;
+
+                    let cfg = state.config.read();
+                    for zone in cfg.zones.iter().rev() {
+                        let zx = zone.rect.x * screen_w;
+                        let zy = zone.rect.y * screen_h;
+                        let zw = zone.rect.width * screen_w;
+                        let zh = zone.rect.height * screen_h;
+
+                        if px >= zx && px <= zx + zw && py >= zy && py <= zy + zh {
+                            if px >= zx + zw - 14.0 && py >= zy + zh - 14.0 {
+                                cursor = IDC_SIZENWSE;
+                            } else {
+                                cursor = IDC_SIZEALL;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                let _ = SetCursor(LoadCursorW(None, cursor).unwrap_or_default());
+                return LRESULT(1);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
 
         WM_KEYDOWN => {
