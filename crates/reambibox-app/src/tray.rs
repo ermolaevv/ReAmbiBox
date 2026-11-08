@@ -11,6 +11,9 @@ use windows::Win32::System::Power::{
 use windows::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_CONTROL, MOD_SHIFT, VK_DOWN, VK_UP,
+};
 use windows::Win32::UI::Shell::{
     ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
     NOTIFYICONDATAW,
@@ -21,8 +24,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, TrackPopupMenuEx, TranslateMessage, HICON, HMENU, IDI_APPLICATION,
     MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, REGISTER_NOTIFICATION_FLAGS,
     SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_COMMAND, WM_DESTROY,
-    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_POWERBROADCAST, WM_QUERYENDSESSION,
-    WM_RBUTTONUP, WM_USER, WM_WTSSESSION_CHANGE, WNDCLASSW,
+    WM_ENDSESSION, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_POWERBROADCAST,
+    WM_QUERYENDSESSION, WM_RBUTTONUP, WM_USER, WM_WTSSESSION_CHANGE, WNDCLASSW,
 };
 
 // Константы оконных сообщений и идентификаторов меню
@@ -32,6 +35,12 @@ const ID_MENU_OVERLAY: usize = 2005;
 const ID_MENU_WEBUI: usize = 2002;
 const ID_MENU_AUTOSTART: usize = 2003;
 const ID_MENU_EXIT: usize = 2004;
+
+// Идентификаторы глобальных горячих клавиш Windows
+const HOTKEY_ID_TOGGLE_POWER: i32 = 101;
+const HOTKEY_ID_BRIGHTNESS_UP: i32 = 102;
+const HOTKEY_ID_BRIGHTNESS_DOWN: i32 = 103;
+const HOTKEY_ID_TOGGLE_OVERLAY: i32 = 104;
 
 // GUID_MONITOR_POWER_ON: {0255fa76-4ae3-492d-9e84-a37f42d2dd77}
 const GUID_MONITOR_POWER_ON: windows::core::GUID = windows::core::GUID::from_u128(0x0255fa76_4ae3_492d_9e84_a37f42d2dd77);
@@ -143,6 +152,14 @@ impl TrayManager {
             // Регистрация на события блокировки сессии (Win + L)
             let _ = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
 
+            // Регистрация глобальных горячих клавиш Windows (Ctrl+Shift+A, Ctrl+Shift+Up/Down, Ctrl+Shift+O)
+            let mods = HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_SHIFT.0);
+            let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER, mods, b'A' as u32);
+            let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP, mods, VK_UP.0 as u32);
+            let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_DOWN, mods, VK_DOWN.0 as u32);
+            let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_OVERLAY, mods, b'O' as u32);
+            println!("[Hotkeys] Глобальные горячие клавиши активны: Ctrl+Shift+A (Вкл/Выкл), Ctrl+Shift+Up/Down (Яркость), Ctrl+Shift+O (Оверлей)");
+
             *GLOBAL_TRAY_CTX.lock() = Some(TrayContext {
                 config,
                 is_running: Arc::clone(&is_running),
@@ -161,6 +178,10 @@ impl TrayManager {
             }
 
             // Очистка перед выходом
+            let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER);
+            let _ = UnregisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP);
+            let _ = UnregisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_DOWN);
+            let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE_OVERLAY);
             let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
             if let Some(ctx) = GLOBAL_TRAY_CTX.lock().take() {
                 if let Some(h) = ctx.h_power_notify {
@@ -232,6 +253,41 @@ unsafe extern "system" fn tray_wnd_proc(
             LRESULT(0)
         }
 
+        WM_HOTKEY => {
+            let hotkey_id = wparam.0 as i32;
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                match hotkey_id {
+                    HOTKEY_ID_TOGGLE_POWER => {
+                        let mut cfg = ctx.config.write();
+                        cfg.is_active = !cfg.is_active;
+                        let active = cfg.is_active;
+                        let _ = cfg.save();
+                        println!("[Hotkey] Питание подсветки (Ctrl+Shift+A): {}", if active { "ВКЛ" } else { "ВЫКЛ" });
+                    }
+                    HOTKEY_ID_BRIGHTNESS_UP => {
+                        let mut cfg = ctx.config.write();
+                        cfg.brightness = (cfg.brightness + 0.1).clamp(0.0, 1.0);
+                        let b = cfg.brightness;
+                        let _ = cfg.save();
+                        println!("[Hotkey] Яркость увеличена (Ctrl+Shift+Up): {:.0}%", b * 100.0);
+                    }
+                    HOTKEY_ID_BRIGHTNESS_DOWN => {
+                        let mut cfg = ctx.config.write();
+                        cfg.brightness = (cfg.brightness - 0.1).clamp(0.0, 1.0);
+                        let b = cfg.brightness;
+                        let _ = cfg.save();
+                        println!("[Hotkey] Яркость уменьшена (Ctrl+Shift+Down): {:.0}%", b * 100.0);
+                    }
+                    HOTKEY_ID_TOGGLE_OVERLAY => {
+                        ctx.overlay_manager.toggle();
+                        println!("[Hotkey] Переключение экранного оверлея зон (Ctrl+Shift+O)");
+                    }
+                    _ => {}
+                }
+            }
+            LRESULT(0)
+        }
+
         WM_QUERYENDSESSION | WM_ENDSESSION => {
             println!("[Завершение Windows] Получен сигнал завершения сеанса/системы — тушим подсветку");
             if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
@@ -280,16 +336,16 @@ unsafe fn show_context_menu(hwnd: HWND) {
     let is_autostart = crate::autostart::is_autostart_enabled();
 
     let toggle_text = if is_active {
-        w!("Подсветка: Включена (Нажмите для выключения)")
+        w!("Подсветка: Включена\tCtrl+Shift+A")
     } else {
-        w!("Подсветка: Выключена (Нажмите для включения)")
+        w!("Подсветка: Выключена\tCtrl+Shift+A")
     };
 
     let autostart_flags = if is_autostart { MF_CHECKED } else { MF_UNCHECKED } | MF_STRING;
 
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_TOGGLE, toggle_text);
-    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, w!("Показать зоны на экране (Калибровка)"));
-    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, w!("Открыть панель управления (Web UI)..."));
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, w!("Показать зоны на экране\tCtrl+Shift+O"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, w!("Панель управления (Web UI)..."));
     let _ = AppendMenuW(menu, autostart_flags, ID_MENU_AUTOSTART, w!("Запуск вместе с Windows"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_EXIT, w!("Выход"));

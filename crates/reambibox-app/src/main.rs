@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod single_instance;
 mod tray;
 mod zone_overlay;
 
@@ -108,12 +109,21 @@ unsafe fn setup_shutdown_handlers(port: String, baud: u32, leds: usize) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 0. Автоматическое замещение предыдущего запущенного экземпляра (Single Instance Takeover)
+    single_instance::ensure_single_instance_takeover();
+
+    // Парсинг аргументов командной строки
+    let args: Vec<String> = std::env::args().collect();
+    let is_minimized = args.iter().any(|arg| arg == "--minimized" || arg == "--silent");
+
     // Включение Per-Monitor DPI Awareness v2 для устранения виртуализации разрешений и масштабирования Windows
     unsafe {
         let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
             windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
         );
-        init_console_support();
+        if !is_minimized {
+            init_console_support();
+        }
     }
 
     println!("============================================================");
