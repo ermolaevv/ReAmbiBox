@@ -1,4 +1,4 @@
-# PowerShell Package Script for ReAmbiBox
+﻿# PowerShell Package Script for ReAmbiBox
 param(
     [switch]$SkipBuild
 )
@@ -38,6 +38,8 @@ if (-not (Test-Path $ExeSource)) {
 
 # 2. Подготовка каталога портативной версии
 Write-Host "`n>>> [2/4] Подготовка файлов портативного релиза..." -ForegroundColor Yellow
+Stop-Process -Name "reambibox-app" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 250
 if (Test-Path $PortableDir) {
     Remove-Item -Recurse -Force $PortableDir
 }

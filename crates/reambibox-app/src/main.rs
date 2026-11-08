@@ -132,6 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Автоматическое замещение предыдущего запущенного экземпляра (Single Instance Takeover)
     single_instance::ensure_single_instance_takeover();
 
+    // Автоматическая актуализация пути автозапуска в реестре Windows (если был включен)
+    autostart::sync_autostart_if_needed();
+
     // Парсинг аргументов командной строки
     let args: Vec<String> = std::env::args().collect();
     let is_minimized = args.iter().any(|arg| arg == "--minimized" || arg == "--silent");
