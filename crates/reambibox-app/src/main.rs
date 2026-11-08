@@ -31,6 +31,8 @@ struct ConfigUpdate {
     static_color: Option<[u8; 3]>,
     selected_monitor: Option<usize>,
     autostart: Option<bool>,
+    target_fps: Option<u32>,
+    baud_rate: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +49,8 @@ struct ApiStatusResponse {
     is_active: bool,
     capture_fps: f32,
     serial_fps: f32,
+    target_fps: u32,
+    baud_rate: u32,
     brightness: f32,
     smoothing: f32,
     gamma: f32,
@@ -159,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cfg_ref = Arc::clone(&shared_config);
 
         std::thread::spawn(move || {
-            let (mut port_name, baud_rate, mut color_order) = {
+            let (mut port_name, mut baud_rate, mut color_order) = {
                 let cfg = cfg_ref.read();
                 (cfg.serial_port.clone(), cfg.baud_rate, cfg.color_order.clone())
             };
@@ -171,17 +175,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut sent_frames: u64 = 0;
             let mut last_fps_time = Instant::now();
 
-            // Такт отправки: 28 мс (~35 FPS) — оптимальный максимум для 115200 бод без переполнения буфера
-            let frame_interval = Duration::from_millis(28);
-
             while run_ref.load(Ordering::Relaxed) {
                 let start = Instant::now();
 
-                // Периодическая проверка смены настроек порта / порядка цветов
-                {
+                // Периодическая проверка смены настроек порта / скорости / порядка цветов
+                let (target_fps, led_count, baud) = {
                     let cfg = cfg_ref.read();
-                    if cfg.serial_port != port_name {
+                    if cfg.serial_port != port_name || cfg.baud_rate != baud_rate {
                         port_name = cfg.serial_port.clone();
+                        baud_rate = cfg.baud_rate;
                         let _ = driver.disconnect();
                         driver = AdalightDriver::new(&port_name, baud_rate);
                     }
@@ -189,7 +191,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         color_order = cfg.color_order.clone();
                         driver.set_color_order(&color_order);
                     }
-                }
+                    (cfg.target_fps, cfg.zones.len(), cfg.baud_rate)
+                };
+
+                // Защита микроконтроллера от переполнения UART буфера:
+                // Время физической передачи пакета (10 бит на байт: 1 старт + 8 данных + 1 стоп)
+                let packet_bytes = (6 + led_count * 3) as u64;
+                let tx_time_ms = (packet_bytes * 10 * 1000) / (baud.max(9600) as u64);
+                // Микроконтроллеру требуется минимум 6-8 мс тишины между кадрами для вызова FastLED.show()
+                let min_safe_interval_ms = tx_time_ms + 7;
+                let requested_interval_ms = if target_fps > 0 {
+                    1000 / (target_fps as u64)
+                } else {
+                    40
+                };
+                let frame_interval = Duration::from_millis(requested_interval_ms.max(min_safe_interval_ms));
 
                 // Автопереподключение к порту при необходимости
                 if !driver.is_connected() {
@@ -485,6 +501,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         is_active: cfg.is_active,
                         capture_fps: c_fps,
                         serial_fps: s_fps,
+                        target_fps: cfg.target_fps,
+                        baud_rate: cfg.baud_rate,
                         brightness: cfg.brightness,
                         smoothing: cfg.smoothing,
                         gamma: cfg.gamma,
@@ -565,6 +583,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(auto) = update.autostart {
                                 let _ = autostart::set_autostart(auto);
                                 println!("[API] Автозагрузка Windows: {}", if auto { "ВКЛ" } else { "ВЫКЛ" });
+                            }
+                            if let Some(fps) = update.target_fps {
+                                println!("[API] Целевой FPS изменен на: {}", fps);
+                                cfg.target_fps = fps.clamp(10, 120);
+                            }
+                            if let Some(baud) = update.baud_rate {
+                                println!("[API] Скорость порта изменена на: {}", baud);
+                                cfg.baud_rate = baud;
                             }
 
                             let _ = cfg.save();

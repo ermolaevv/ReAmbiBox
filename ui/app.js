@@ -27,6 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const valGamma = document.getElementById('val-gamma');
   const toggleLetterbox = document.getElementById('toggle-letterbox');
   const toggleAutostart = document.getElementById('toggle-autostart');
+  const sliderFps = document.getElementById('slider-fps');
+  const valFps = document.getElementById('val-fps');
+  const selectBaud = document.getElementById('select-baud');
 
   const selectMonitor = document.getElementById('select-monitor');
   const selectColorOrder = document.getElementById('select-color-order');
@@ -85,6 +88,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // Привязка автозапуска Windows
   toggleAutostart?.addEventListener('change', (e) => {
     queueConfigUpdate({ autostart: e.target.checked });
+  });
+
+  // Привязка целевого FPS
+  sliderFps?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valFps.textContent = val + ' FPS';
+    queueConfigUpdate({ target_fps: val });
+  });
+
+  // Выбор скорости порта
+  selectBaud?.addEventListener('change', (e) => {
+    const baud = parseInt(e.target.value);
+    queueConfigUpdate({ baud_rate: baud });
   });
 
   // Переключение режимов
@@ -201,6 +217,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (toggleAutostart) {
           toggleAutostart.checked = data.autostart;
+        }
+        if (sliderFps && data.target_fps) {
+          sliderFps.value = data.target_fps;
+          valFps.textContent = data.target_fps + ' FPS';
+        }
+        if (selectBaud && data.baud_rate) {
+          selectBaud.value = data.baud_rate.toString();
         }
 
         // Заполняем мониторы

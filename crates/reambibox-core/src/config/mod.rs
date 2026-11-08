@@ -56,7 +56,7 @@ impl Default for AppConfig {
             smoothing: 0.5,
             gamma: 2.2,
             letterbox_detection: true,
-            target_fps: 60,
+            target_fps: 30,
             is_active: true,
             mode: default_mode(),
             color_order: default_color_order(),
