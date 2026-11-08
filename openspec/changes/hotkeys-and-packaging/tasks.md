@@ -6,14 +6,16 @@
 - [ ] 1.2 Реализовать обработку сообщения `WM_HOTKEY` в `tray_wnd_proc` с мгновенным изменением и сохранением состояния в `shared_config` и обновлением параметров контроллера. Проверить переключение питания и регулировку яркости.
 - [ ] 1.3 Добавить в веб-панель управления (вкладка «Настройки» или плашка в шапке) подсказку по активным клавиатурным сочетаниям для информирования пользователя.
 
-## 2. Тихий запуск и поддержка аргумента --minimized
+## 2. Тихий запуск, уникальность процесса и аргумент --minimized
 
-- [ ] 2.1 Добавить парсинг аргументов командной строки в `crates/reambibox-app/src/main.rs`: при наличии аргумента `--minimized` или `--silent` пропускать подключение консоли (`init_console_support`) и запускать приложение в скрытом режиме с иконкой в трее.
-- [ ] 2.2 Обновить модуль `crates/reambibox-app/src/autostart.rs`: при включении автозагрузки прописывать в реестре `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` команду вида `"<path>\reambibox-app.exe" --minimized`.
-- [ ] 2.3 Обновить модульный тест `test_autostart_toggle` в `autostart.rs` с проверкой корректности сохранения аргумента `--minimized`. Проверить через `cargo test -p reambibox-app`.
+- [ ] 2.1 Реализовать функцию `ensure_single_instance_takeover()` через Win32 Toolhelp32 API (`CreateToolhelp32Snapshot`), которая при запуске ищет ранее запущенные процессы `reambibox-app.exe`, молча завершает их через `TerminateProcess`, ожидает освобождения портов и выводит лог замещения.
+- [ ] 2.2 Добавить парсинг аргументов командной строки в `crates/reambibox-app/src/main.rs`: при наличии аргумента `--minimized` или `--silent` пропускать подключение консоли (`init_console_support`) и запускать приложение в скрытом режиме с иконкой в трее.
+- [ ] 2.3 Обновить модуль `crates/reambibox-app/src/autostart.rs`: при включении автозагрузки прописывать в реестре `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` команду вида `"<path>\reambibox-app.exe" --minimized`.
+- [ ] 2.4 Обновить модульный тест `test_autostart_toggle` в `autostart.rs` с проверкой корректности сохранения аргумента `--minimized`. Проверить через `cargo test -p reambibox-app`.
 
 ## 3. Скрипты упаковки и инсталлятор Windows
 
 - [ ] 3.1 Создать PowerShell скрипт `scripts/package.ps1` для автоматизированной компиляции `cargo build --release`, сбора артефактов и упаковки в переносимый ZIP-архив `ReAmbiBox-Portable.zip`.
 - [ ] 3.2 Создать установочный скрипт Inno Setup `scripts/installer.iss` с конфигурацией установки в `{autopf}\ReAmbiBox`, добавлением ярлыка в меню «Пуск», ассоциацией иконки и деинсталлятором.
 - [ ] 3.3 Проверить генерацию портативного дистрибутива запуском `scripts/package.ps1` и убедиться в целостности собранного архива.
+
