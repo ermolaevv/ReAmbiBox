@@ -576,6 +576,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
 
+                if req_text.starts_with("GET /favicon.png") {
+                    let bytes = include_bytes!("../../../ui/favicon.png");
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(bytes).await;
+                    return;
+                }
+
+                if req_text.starts_with("GET /icon.png") {
+                    let bytes = include_bytes!("../../../ui/icon.png");
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(bytes).await;
+                    return;
+                }
+
                 // Статика: CSS, JS, HTML
                 let (content_type, body) = if req_text.starts_with("GET /style.css") {
                     ("text/css", include_str!("../../../ui/style.css"))
