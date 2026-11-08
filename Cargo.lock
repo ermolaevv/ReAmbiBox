@@ -295,6 +295,8 @@ dependencies = [
  "anyhow",
  "parking_lot",
  "reambibox-core",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

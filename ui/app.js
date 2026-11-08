@@ -14,80 +14,137 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Ползунки
-  const setupSlider = (sliderId, valId, formatFn) => {
-    const slider = document.getElementById(sliderId);
-    const label = document.getElementById(valId);
-    if (slider && label) {
-      slider.addEventListener('input', () => {
-        label.textContent = formatFn(slider.value);
-      });
-    }
-  };
-
-  setupSlider('slider-brightness', 'val-brightness', v => v + '%');
-  setupSlider('slider-smoothing', 'val-smoothing', v => (v / 100).toFixed(2));
-  setupSlider('slider-gamma', 'val-gamma', v => (v / 10).toFixed(1));
-
-  // Отрисовка зон подсветки
+  const btnPower = document.getElementById('toggle-power');
+  const sliderBrightness = document.getElementById('slider-brightness');
+  const valBrightness = document.getElementById('val-brightness');
+  const sliderSmoothing = document.getElementById('slider-smoothing');
+  const valSmoothing = document.getElementById('val-smoothing');
+  const sliderGamma = document.getElementById('slider-gamma');
+  const valGamma = document.getElementById('val-gamma');
+  const toggleLetterbox = document.getElementById('toggle-letterbox');
+  const systemStatus = document.getElementById('system-status');
   const canvas = document.getElementById('monitor-canvas');
-  let zones = [];
 
-  // Генератор периметра зон (по умолчанию 60 LED: 20 верх, 20 низ, 10 лево, 10 право)
-  function generateZones(topCount = 20, bottomCount = 20, leftCount = 10, rightCount = 10) {
-    zones = [];
-    let id = 0;
-    const depth = 0.10;
+  let currentConfig = null;
 
-    // Низ (слева направо)
-    const bStep = 1.0 / bottomCount;
-    for (let i = 0; i < bottomCount; i++) {
-      zones.push({ id: id++, x: i * bStep, y: 1.0 - depth, w: bStep, h: depth });
+  // Отправка обновленных настроек на бэкенд
+  async function updateConfig(partial) {
+    try {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(partial)
+      });
+    } catch (e) {
+      console.error('Ошибка отправки настроек:', e);
     }
-
-    // Право (снизу вверх)
-    const rStep = 1.0 / rightCount;
-    for (let i = rightCount - 1; i >= 0; i--) {
-      zones.push({ id: id++, x: 1.0 - depth, y: i * rStep, w: depth, h: rStep });
-    }
-
-    // Верх (справа налево)
-    const tStep = 1.0 / topCount;
-    for (let i = topCount - 1; i >= 0; i--) {
-      zones.push({ id: id++, x: i * tStep, y: 0.0, w: tStep, h: depth });
-    }
-
-    // Лево (сверху вниз)
-    const lStep = 1.0 / leftCount;
-    for (let i = 0; i < leftCount; i++) {
-      zones.push({ id: id++, x: 0.0, y: i * lStep, w: depth, h: lStep });
-    }
-
-    renderZones();
   }
 
-  function renderZones() {
-    if (!canvas) return;
-    canvas.innerHTML = '';
-    const cw = canvas.clientWidth;
-    const ch = canvas.clientHeight;
+  // Привязка ползунка яркости
+  sliderBrightness?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valBrightness.textContent = val + '%';
+    updateConfig({ brightness: val / 100.0 });
+  });
 
-    zones.forEach(z => {
+  // Привязка сглаживания
+  sliderSmoothing?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valSmoothing.textContent = (val / 100).toFixed(2);
+    updateConfig({ smoothing: val / 100.0 });
+  });
+
+  // Привязка гаммы
+  sliderGamma?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valGamma.textContent = (val / 10).toFixed(1);
+    updateConfig({ gamma: val / 10.0 });
+  });
+
+  // Привязка детектора 21:9
+  toggleLetterbox?.addEventListener('change', (e) => {
+    updateConfig({ letterbox: e.target.checked });
+  });
+
+  // Кнопка включения/выключения
+  btnPower?.addEventListener('click', async () => {
+    if (!currentConfig) return;
+    const newState = !currentConfig.is_active;
+    await updateConfig({ is_active: newState });
+    currentConfig.is_active = newState;
+    updatePowerButton(newState);
+  });
+
+  function updatePowerButton(isActive) {
+    if (btnPower) {
+      if (isActive) {
+        btnPower.textContent = 'Выключить подсветку';
+        btnPower.className = 'btn btn-primary';
+      } else {
+        btnPower.textContent = 'Включить подсветку';
+        btnPower.className = 'btn btn-secondary';
+      }
+    }
+  }
+
+  // Отрисовка зон
+  function renderZones(zones) {
+    if (!canvas || !zones) return;
+    canvas.innerHTML = '';
+
+    zones.forEach((z, idx) => {
       const box = document.createElement('div');
       box.className = 'zone-box';
-      box.style.left = (z.x * 100) + '%';
-      box.style.top = (z.y * 100) + '%';
-      box.style.width = (z.w * 100) + '%';
-      box.style.height = (z.h * 100) + '%';
-      box.textContent = z.id;
+      box.style.left = (z.rect.x * 100) + '%';
+      box.style.top = (z.rect.y * 100) + '%';
+      box.style.width = (z.rect.width * 100) + '%';
+      box.style.height = (z.rect.height * 100) + '%';
+      box.textContent = (z.id + 1); // 1-based для соответствия AmbiBox
+      box.title = `Зона ${z.id + 1}: [x=${(z.rect.x*100).toFixed(1)}%, y=${(z.rect.y*100).toFixed(1)}%]`;
       canvas.appendChild(box);
     });
   }
 
-  document.getElementById('btn-wizard')?.addEventListener('click', () => {
-    generateZones(20, 20, 10, 10);
-  });
+  // Загрузка состояния с бэкенда
+  async function fetchStatus() {
+    try {
+      const res = await fetch('/api/config');
+      if (!res.ok) return;
+      const data = await res.json();
+      currentConfig = data;
 
-  generateZones(20, 20, 10, 10);
+      // Обновляем статус в сайдбаре
+      if (systemStatus) {
+        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} (${data.serial_port}, ${data.fps.toFixed(1)} FPS)`;
+      }
+
+      updatePowerButton(data.is_active);
+
+      // Синхронизируем контролы только при первой загрузке
+      if (!window.__initialized) {
+        window.__initialized = true;
+        if (sliderBrightness) {
+          sliderBrightness.value = Math.round(data.brightness * 100);
+          valBrightness.textContent = sliderBrightness.value + '%';
+        }
+        if (sliderSmoothing) {
+          sliderSmoothing.value = Math.round(data.smoothing * 100);
+          valSmoothing.textContent = (data.smoothing).toFixed(2);
+        }
+        if (sliderGamma) {
+          sliderGamma.value = Math.round(data.gamma * 10);
+          valGamma.textContent = (data.gamma).toFixed(1);
+        }
+        if (toggleLetterbox) {
+          toggleLetterbox.checked = data.letterbox;
+        }
+        renderZones(data.zones);
+      }
+    } catch (e) {
+      console.warn('Сервер ReAmbiBox недоступен:', e);
+    }
+  }
+
+  fetchStatus();
+  setInterval(fetchStatus, 1500);
 });
-
