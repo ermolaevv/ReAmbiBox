@@ -79,6 +79,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const infoZoneCoords = document.getElementById('info-zone-coords');
   const toggleZoneSnapping = document.getElementById('toggle-zone-snapping');
 
+  const btnSaveAsPreset = document.getElementById('btn-save-as-preset');
+  const presetsContainer = document.getElementById('presets-container');
+  const labelActivePreset = document.getElementById('label-active-preset');
+  const modalPreset = document.getElementById('modal-preset');
+  const modalPresetTitle = document.getElementById('modal-preset-title');
+  const btnClosePresetModal = document.getElementById('btn-close-preset-modal');
+  const btnCancelPreset = document.getElementById('btn-cancel-preset');
+  const btnConfirmSavePreset = document.getElementById('btn-confirm-save-preset');
+  const inputPresetName = document.getElementById('input-preset-name');
+  const inputPresetId = document.getElementById('input-preset-id');
+
   let currentConfig = null;
   let updateTimer = null;
   let pendingUpdates = {};
@@ -602,6 +613,204 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Управление пресетами
+  function openPresetModal(name = '', id = '') {
+    if (!modalPreset) return;
+    if (modalPresetTitle) {
+      modalPresetTitle.textContent = id ? 'Обновить / переименовать пресет' : 'Сохранить пресет';
+    }
+    if (inputPresetName) inputPresetName.value = name;
+    if (inputPresetId) inputPresetId.value = id;
+    modalPreset.style.display = 'flex';
+    inputPresetName?.focus();
+  }
+
+  function closePresetModal() {
+    if (!modalPreset) return;
+    modalPreset.style.display = 'none';
+    if (inputPresetName) inputPresetName.value = '';
+    if (inputPresetId) inputPresetId.value = '';
+  }
+
+  btnSaveAsPreset?.addEventListener('click', () => {
+    openPresetModal('', '');
+  });
+
+  btnClosePresetModal?.addEventListener('click', closePresetModal);
+  btnCancelPreset?.addEventListener('click', closePresetModal);
+
+  modalPreset?.addEventListener('click', (e) => {
+    if (e.target === modalPreset) closePresetModal();
+  });
+
+  inputPresetName?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      btnConfirmSavePreset?.click();
+    } else if (e.key === 'Escape') {
+      closePresetModal();
+    }
+  });
+
+  btnConfirmSavePreset?.addEventListener('click', async () => {
+    const name = inputPresetName?.value?.trim();
+    if (!name) {
+      alert('Пожалуйста, введите название пресета');
+      return;
+    }
+    const id = inputPresetId?.value?.trim() || null;
+    try {
+      btnConfirmSavePreset.disabled = true;
+      btnConfirmSavePreset.textContent = 'Сохранение...';
+      const res = await fetch('/api/presets/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, id })
+      });
+      if (res.ok) {
+        closePresetModal();
+        window.__initialized = false;
+        await fetchStatus();
+      } else {
+        alert('Не удалось сохранить пресет');
+      }
+    } catch (e) {
+      console.error('Ошибка сохранения пресета:', e);
+      alert('Ошибка при сохранении пресета');
+    } finally {
+      if (btnConfirmSavePreset) {
+        btnConfirmSavePreset.disabled = false;
+        btnConfirmSavePreset.textContent = 'Сохранить';
+      }
+    }
+  });
+
+  async function applyPreset(id) {
+    try {
+      const res = await fetch('/api/presets/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        window.__initialized = false;
+        await fetchStatus();
+      }
+    } catch (e) {
+      console.error('Ошибка применения пресета:', e);
+    }
+  }
+
+  async function overwritePreset(preset) {
+    if (!confirm(`Перезаписать пресет "${preset.name}" текущими настройками подсветки?`)) return;
+    try {
+      const res = await fetch('/api/presets/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: preset.name, id: preset.id })
+      });
+      if (res.ok) {
+        window.__initialized = false;
+        await fetchStatus();
+      }
+    } catch (e) {
+      console.error('Ошибка обновления пресета:', e);
+    }
+  }
+
+  async function deletePreset(id, name) {
+    if (!confirm(`Удалить пресет "${name}"?`)) return;
+    try {
+      const res = await fetch('/api/presets/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        window.__initialized = false;
+        await fetchStatus();
+      }
+    } catch (e) {
+      console.error('Ошибка удаления пресета:', e);
+    }
+  }
+
+  function renderPresets(presets, activePresetId) {
+    if (!presetsContainer) return;
+
+    if (activePresetId && Array.isArray(presets)) {
+      const active = presets.find(p => p.id === activePresetId);
+      if (active && labelActivePreset) {
+        labelActivePreset.textContent = `Активен: ${active.name}`;
+        labelActivePreset.style.display = 'inline-block';
+      } else if (labelActivePreset) {
+        labelActivePreset.style.display = 'none';
+      }
+    } else if (labelActivePreset) {
+      labelActivePreset.style.display = 'none';
+    }
+
+    presetsContainer.innerHTML = '';
+
+    if (!presets || presets.length === 0) {
+      const hint = document.createElement('div');
+      hint.id = 'presets-empty-hint';
+      hint.style.fontSize = '13px';
+      hint.style.color = 'var(--text-muted)';
+      hint.textContent = 'Нет сохранённых пресетов. Настройте желаемые параметры и нажмите «+ Сохранить текущие как пресет».';
+      presetsContainer.appendChild(hint);
+      return;
+    }
+
+    presets.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'preset-chip' + (p.id === activePresetId ? ' active' : '');
+
+      const btnName = document.createElement('button');
+      btnName.type = 'button';
+      btnName.className = 'preset-name-btn';
+      btnName.textContent = p.name;
+      btnName.title = `Применить пресет "${p.name}"`;
+      btnName.addEventListener('click', () => applyPreset(p.id));
+
+      const btnSaveOver = document.createElement('button');
+      btnSaveOver.type = 'button';
+      btnSaveOver.className = 'btn-chip-action';
+      btnSaveOver.innerHTML = '💾';
+      btnSaveOver.title = 'Перезаписать пресет текущими настройками';
+      btnSaveOver.addEventListener('click', (e) => {
+        e.stopPropagation();
+        overwritePreset(p);
+      });
+
+      const btnEdit = document.createElement('button');
+      btnEdit.type = 'button';
+      btnEdit.className = 'btn-chip-action';
+      btnEdit.innerHTML = '✏️';
+      btnEdit.title = 'Переименовать пресет';
+      btnEdit.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPresetModal(p.name, p.id);
+      });
+
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.className = 'btn-chip-action btn-chip-delete';
+      btnDel.innerHTML = '&times;';
+      btnDel.title = 'Удалить пресет';
+      btnDel.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deletePreset(p.id, p.name);
+      });
+
+      chip.appendChild(btnName);
+      chip.appendChild(btnSaveOver);
+      chip.appendChild(btnEdit);
+      chip.appendChild(btnDel);
+
+      presetsContainer.appendChild(chip);
+    });
+  }
+
   // Загрузка состояния с бэкенда
   async function fetchStatus() {
     try {
@@ -619,6 +828,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updatePowerButton(data.is_active);
       updateOverlayButton(data.is_overlay_visible);
       renderZones(data.zones);
+      renderPresets(data.presets, data.active_preset);
 
       // Синхронизируем контролы только при первой загрузке
       if (!window.__initialized) {

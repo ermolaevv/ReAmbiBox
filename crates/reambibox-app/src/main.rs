@@ -97,7 +97,25 @@ struct ApiStatusResponse {
     available_ports: Vec<String>,
     is_overlay_visible: bool,
     hotkeys: HotkeysConfig,
+    presets: Vec<reambibox_core::config::Preset>,
+    active_preset: Option<String>,
     zones: Vec<reambibox_core::color::zone::Zone>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PresetApplyRequest {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PresetSaveRequest {
+    name: String,
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PresetDeleteRequest {
+    id: String,
 }
 
 unsafe fn init_console_support() {
@@ -753,6 +771,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         available_ports: AdalightDriver::available_ports(),
                         is_overlay_visible: overlay_ref.is_visible(),
                         hotkeys: cfg.hotkeys.clone(),
+                        presets: cfg.presets.clone(),
+                        active_preset: cfg.active_preset.clone(),
                         zones: cfg.zones.clone(),
                     };
 
@@ -926,12 +946,97 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 tray_ref.reload_hotkeys();
                             }
 
+                            // При ручной правке параметров сбрасываем привязку к активному пресету
+                            cfg.active_preset = None;
+
                             let _ = cfg.save();
                         }
                     }
 
                     let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
                     let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // API: POST /api/presets/apply
+                if req_text.starts_with("POST /api/presets/apply") {
+                    let mut applied = false;
+                    if let Some(body_start) = req_text.find("\r\n\r\n") {
+                        let body = &req_text[body_start + 4..];
+                        if let Ok(req) = serde_json::from_str::<PresetApplyRequest>(body) {
+                            let mut cfg = config_ref.write();
+                            if cfg.apply_preset(&req.id) {
+                                if let Ok(mut st) = state_ref.try_write() {
+                                    st.brightness = cfg.brightness;
+                                    st.smooth = cfg.smoothing;
+                                    st.gamma = cfg.gamma;
+                                    st.is_active = cfg.is_active;
+                                }
+                                let _ = cfg.save();
+                                println!("[API] Применён пресет: {}", req.id);
+                                applied = true;
+                            }
+                        }
+                    }
+                    if applied {
+                        let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    } else {
+                        let response = "HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 26\r\nConnection: close\r\n\r\n{\"error\":\"Пресет не найден\"}";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    }
+                    return;
+                }
+
+                // API: POST /api/presets/save
+                if req_text.starts_with("POST /api/presets/save") {
+                    let mut saved_id: Option<String> = None;
+                    if let Some(body_start) = req_text.find("\r\n\r\n") {
+                        let body = &req_text[body_start + 4..];
+                        if let Ok(req) = serde_json::from_str::<PresetSaveRequest>(body) {
+                            let mut cfg = config_ref.write();
+                            let preset_id = cfg.save_preset(&req.name, req.id.as_deref());
+                            let _ = cfg.save();
+                            println!("[API] Сохранён пресет: {} ({})", req.name, preset_id);
+                            saved_id = Some(preset_id);
+                        }
+                    }
+                    if let Some(id) = saved_id {
+                        let json = format!("{{\"status\":\"ok\",\"id\":\"{}\"}}", id);
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            json.len(),
+                            json
+                        );
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    } else {
+                        let response = "HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 32\r\nConnection: close\r\n\r\n{\"error\":\"Неверные данные пресета\"}";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    }
+                    return;
+                }
+
+                // API: POST /api/presets/delete
+                if req_text.starts_with("POST /api/presets/delete") {
+                    let mut deleted = false;
+                    if let Some(body_start) = req_text.find("\r\n\r\n") {
+                        let body = &req_text[body_start + 4..];
+                        if let Ok(req) = serde_json::from_str::<PresetDeleteRequest>(body) {
+                            let mut cfg = config_ref.write();
+                            if cfg.delete_preset(&req.id) {
+                                let _ = cfg.save();
+                                println!("[API] Удалён пресет: {}", req.id);
+                                deleted = true;
+                            }
+                        }
+                    }
+                    if deleted {
+                        let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    } else {
+                        let response = "HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 26\r\nConnection: close\r\n\r\n{\"error\":\"Пресет не найден\"}";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                    }
                     return;
                 }
 

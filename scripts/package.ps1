@@ -1,4 +1,4 @@
-﻿# PowerShell Package Script for ReAmbiBox
+# PowerShell Package Script for ReAmbiBox
 param(
     [switch]$SkipBuild
 )

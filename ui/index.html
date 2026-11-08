@@ -42,6 +42,23 @@
         </header>
 
         <div class="cards-grid">
+          <!-- Блок пресетов -->
+          <div class="card" style="grid-column: 1 / -1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <h3 style="margin: 0;">Пресеты настроек</h3>
+                <span id="label-active-preset" class="badge-preset" style="display:none;"></span>
+              </div>
+              <button id="btn-save-as-preset" class="btn btn-secondary" style="font-size: 13px; padding: 6px 14px;">+ Сохранить текущие как пресет</button>
+            </div>
+
+            <div id="presets-container" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center;">
+              <div id="presets-empty-hint" style="font-size: 13px; color: var(--text-muted);">
+                Нет сохранённых пресетов. Настройте желаемые параметры и нажмите «+ Сохранить текущие как пресет».
+              </div>
+            </div>
+          </div>
+
           <div class="card">
             <h3>Режим работы</h3>
             <div style="display:flex; gap:8px;">
@@ -402,6 +419,24 @@
           <p>Поддерживает плагины Kodi, Prismatik, Home Assistant и Python-скрипты AmbiBox.</p>
         </div>
       </section>
+      <!-- Модальное окно: Сохранение пресета -->
+      <div id="modal-preset" class="modal-backdrop" style="display:none;">
+        <div class="modal-card" style="max-width: 420px;">
+          <div class="modal-header">
+            <h3 id="modal-preset-title">Сохранить пресет</h3>
+            <button id="btn-close-preset-modal" class="btn-icon">&times;</button>
+          </div>
+          <div class="modal-body">
+            <label style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 6px;">Название пресета:</label>
+            <input type="text" id="input-preset-name" placeholder="Например: Кино, Игры, Вечер..." class="input-field" style="width: 100%;">
+            <input type="hidden" id="input-preset-id" value="">
+          </div>
+          <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+            <button id="btn-cancel-preset" class="btn btn-secondary">Отмена</button>
+            <button id="btn-confirm-save-preset" class="btn btn-primary">Сохранить</button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
   <script src="app.js"></script>

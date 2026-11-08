@@ -34,6 +34,7 @@ const ID_MENU_OVERLAY: usize = 2005;
 const ID_MENU_WEBUI: usize = 2002;
 const ID_MENU_AUTOSTART: usize = 2003;
 const ID_MENU_EXIT: usize = 2004;
+const ID_MENU_PRESET_BASE: usize = 3000;
 
 // Идентификаторы глобальных горячих клавиш Windows
 const HOTKEY_ID_TOGGLE_POWER: i32 = 101;
@@ -419,6 +420,40 @@ unsafe fn show_context_menu(hwnd: HWND) {
     let autostart_flags = if is_autostart { MF_CHECKED } else { MF_UNCHECKED } | MF_STRING;
 
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_TOGGLE, toggle_text);
+
+    let (presets, active_preset) = if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+        let cfg = ctx.config.read();
+        (cfg.presets.clone(), cfg.active_preset.clone())
+    } else {
+        (Vec::new(), None)
+    };
+
+    if !presets.is_empty() {
+        if let Ok(preset_menu) = CreatePopupMenu() {
+            for (idx, p) in presets.iter().enumerate() {
+                let flags = if active_preset.as_deref() == Some(&p.id) {
+                    MF_CHECKED
+                } else {
+                    MF_UNCHECKED
+                } | MF_STRING;
+
+                let wide_name = windows::core::HSTRING::from(&p.name);
+                let _ = AppendMenuW(
+                    preset_menu,
+                    flags,
+                    ID_MENU_PRESET_BASE + idx,
+                    PCWSTR(wide_name.as_ptr()),
+                );
+            }
+            let _ = AppendMenuW(
+                menu,
+                windows::Win32::UI::WindowsAndMessaging::MF_POPUP,
+                preset_menu.0 as usize,
+                w!("Пресеты"),
+            );
+        }
+    }
+
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, w!("Показать зоны на экране\tCtrl+Shift+O"));
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, w!("Панель управления (Web UI)..."));
     let _ = AppendMenuW(menu, autostart_flags, ID_MENU_AUTOSTART, w!("Запуск вместе с Windows"));
@@ -463,6 +498,17 @@ unsafe fn handle_menu_command(cmd_id: usize) {
             let new_state = !current;
             let _ = crate::autostart::set_autostart(new_state);
             println!("[Трей] Автозапуск изменен: {}", if new_state { "ВКЛ" } else { "ВЫКЛ" });
+        }
+        cmd if cmd >= ID_MENU_PRESET_BASE && cmd < ID_MENU_PRESET_BASE + 200 => {
+            let index = cmd - ID_MENU_PRESET_BASE;
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                let mut cfg = ctx.config.write();
+                if let Some(target) = cfg.presets.get(index).cloned() {
+                    cfg.apply_preset(&target.id);
+                    let _ = cfg.save();
+                    println!("[Трей] Активирован пресет: {}", target.name);
+                }
+            }
         }
         ID_MENU_EXIT => {
             println!("[Трей] Запрос выхода из приложения...");
