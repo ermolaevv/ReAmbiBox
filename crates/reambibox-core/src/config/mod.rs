@@ -40,6 +40,16 @@ pub struct AppConfig {
     pub wled_port: u16,
     #[serde(default = "default_wled_protocol")]
     pub wled_protocol: String,
+    #[serde(default = "default_one_f32")]
+    pub white_balance_r: f32,
+    #[serde(default = "default_one_f32")]
+    pub white_balance_g: f32,
+    #[serde(default = "default_one_f32")]
+    pub white_balance_b: f32,
+    #[serde(default)]
+    pub black_level_threshold: u8,
+    #[serde(default = "default_one_f32")]
+    pub saturation_boost: f32,
     #[serde(default)]
     pub hotkeys: HotkeysConfig,
     pub zones: Vec<Zone>,
@@ -131,6 +141,10 @@ fn default_wled_protocol() -> String {
     "ddp".to_string()
 }
 
+fn default_one_f32() -> f32 {
+    1.0
+}
+
 fn default_version_counter() -> Arc<AtomicU64> {
     Arc::new(AtomicU64::new(1))
 }
@@ -156,6 +170,11 @@ impl PartialEq for AppConfig {
             && self.wled_host == other.wled_host
             && self.wled_port == other.wled_port
             && self.wled_protocol == other.wled_protocol
+            && self.white_balance_r == other.white_balance_r
+            && self.white_balance_g == other.white_balance_g
+            && self.white_balance_b == other.white_balance_b
+            && self.black_level_threshold == other.black_level_threshold
+            && self.saturation_boost == other.saturation_boost
             && self.hotkeys == other.hotkeys
             && self.zones == other.zones
     }
@@ -186,6 +205,11 @@ impl Default for AppConfig {
             wled_host: default_wled_host(),
             wled_port: default_wled_port(),
             wled_protocol: default_wled_protocol(),
+            white_balance_r: 1.0,
+            white_balance_g: 1.0,
+            white_balance_b: 1.0,
+            black_level_threshold: 0,
+            saturation_boost: 1.0,
             hotkeys: HotkeysConfig::default(),
             zones,
         }

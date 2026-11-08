@@ -21,3 +21,4 @@
 - `crates/reambibox-core/src/config/mod.rs`: новые поля `white_balance_r`, `white_balance_g`, `white_balance_b`, `black_level_threshold`, `saturation_boost`.
 - `crates/reambibox-app/src/main.rs`: проброс параметров в API `GET /api/config` и `POST /api/config`, передача коэффициентов в `GammaLut::new_calibrated(...)`.
 - `ui/index.html`, `ui/app.js`, `ui/style.css`: блок «Калибровка цвета» со слайдерами баланса белого, порога черного и насыщенности.
+

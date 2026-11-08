@@ -32,6 +32,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const valGamma = document.getElementById('val-gamma');
   const toggleLetterbox = document.getElementById('toggle-letterbox');
   const toggleAutostart = document.getElementById('toggle-autostart');
+
+  const sliderWbR = document.getElementById('slider-wb-r');
+  const valWbR = document.getElementById('val-wb-r');
+  const sliderWbG = document.getElementById('slider-wb-g');
+  const valWbG = document.getElementById('val-wb-g');
+  const sliderWbB = document.getElementById('slider-wb-b');
+  const valWbB = document.getElementById('val-wb-b');
+  const sliderBlackThreshold = document.getElementById('slider-black-threshold');
+  const valBlackThreshold = document.getElementById('val-black-threshold');
+  const sliderSaturation = document.getElementById('slider-saturation');
+  const valSaturation = document.getElementById('val-saturation');
+  const btnResetCalibration = document.getElementById('btn-reset-calibration');
+
   const sliderFps = document.getElementById('slider-fps');
   const valFps = document.getElementById('val-fps');
   const selectBaud = document.getElementById('select-baud');
@@ -123,6 +136,59 @@ document.addEventListener('DOMContentLoaded', () => {
   // Привязка автозапуска Windows
   toggleAutostart?.addEventListener('change', (e) => {
     queueConfigUpdate({ autostart: e.target.checked });
+  });
+
+  // Привязка баланса белого (R, G, B)
+  sliderWbR?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    const f = (val / 100.0).toFixed(2);
+    valWbR.textContent = f + 'x';
+    queueConfigUpdate({ white_balance_r: parseFloat(f) });
+  });
+
+  sliderWbG?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    const f = (val / 100.0).toFixed(2);
+    valWbG.textContent = f + 'x';
+    queueConfigUpdate({ white_balance_g: parseFloat(f) });
+  });
+
+  sliderWbB?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    const f = (val / 100.0).toFixed(2);
+    valWbB.textContent = f + 'x';
+    queueConfigUpdate({ white_balance_b: parseFloat(f) });
+  });
+
+  // Привязка порога отсечки черного
+  sliderBlackThreshold?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valBlackThreshold.textContent = val === 0 ? 'Выкл (0)' : val.toString();
+    queueConfigUpdate({ black_level_threshold: val });
+  });
+
+  // Привязка насыщенности
+  sliderSaturation?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    valSaturation.textContent = val + '%';
+    queueConfigUpdate({ saturation_boost: val / 100.0 });
+  });
+
+  // Сброс калибровки к значениям по умолчанию
+  btnResetCalibration?.addEventListener('click', () => {
+    if (sliderWbR) { sliderWbR.value = 100; valWbR.textContent = '1.00x'; }
+    if (sliderWbG) { sliderWbG.value = 100; valWbG.textContent = '1.00x'; }
+    if (sliderWbB) { sliderWbB.value = 100; valWbB.textContent = '1.00x'; }
+    if (sliderBlackThreshold) { sliderBlackThreshold.value = 0; valBlackThreshold.textContent = 'Выкл (0)'; }
+    if (sliderSaturation) { sliderSaturation.value = 100; valSaturation.textContent = '100%'; }
+
+    queueConfigUpdate({
+      white_balance_r: 1.0,
+      white_balance_g: 1.0,
+      white_balance_b: 1.0,
+      black_level_threshold: 0,
+      saturation_boost: 1.0,
+    });
   });
 
   // Привязка целевого FPS
@@ -575,6 +641,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (toggleAutostart) {
           toggleAutostart.checked = data.autostart;
+        }
+        if (sliderWbR && data.white_balance_r !== undefined) {
+          sliderWbR.value = Math.round(data.white_balance_r * 100);
+          valWbR.textContent = (data.white_balance_r).toFixed(2) + 'x';
+        }
+        if (sliderWbG && data.white_balance_g !== undefined) {
+          sliderWbG.value = Math.round(data.white_balance_g * 100);
+          valWbG.textContent = (data.white_balance_g).toFixed(2) + 'x';
+        }
+        if (sliderWbB && data.white_balance_b !== undefined) {
+          sliderWbB.value = Math.round(data.white_balance_b * 100);
+          valWbB.textContent = (data.white_balance_b).toFixed(2) + 'x';
+        }
+        if (sliderBlackThreshold && data.black_level_threshold !== undefined) {
+          sliderBlackThreshold.value = data.black_level_threshold;
+          valBlackThreshold.textContent = data.black_level_threshold === 0 ? 'Выкл (0)' : data.black_level_threshold.toString();
+        }
+        if (sliderSaturation && data.saturation_boost !== undefined) {
+          sliderSaturation.value = Math.round(data.saturation_boost * 100);
+          valSaturation.textContent = sliderSaturation.value + '%';
         }
         if (sliderFps && data.target_fps) {
           sliderFps.value = data.target_fps;

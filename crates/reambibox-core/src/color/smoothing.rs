@@ -48,18 +48,21 @@ impl TemporalSmoother {
         result
     }
 
-    /// Высокопроизводительное сглаживание цветов по месту с одновременным применением Gamma LUT
+    /// Высокопроизводительное сглаживание цветов по месту с одновременным применением насыщенности и Gamma LUT
     /// Не производит аллокаций памяти при неизменном размере вектора out
     pub fn smooth_into(
         &mut self,
         targets: &[RgbColor],
         factor: f32,
         lut: &GammaLut,
+        saturation: f32,
         out: &mut Vec<RgbColor>,
     ) {
         let factor = factor.clamp(0.0, 0.99);
         out.clear();
         out.reserve(targets.len());
+
+        let need_sat = (saturation - 1.0).abs() >= 0.005;
 
         if self.current_colors.len() != targets.len() {
             self.current_colors = targets
@@ -67,7 +70,8 @@ impl TemporalSmoother {
                 .map(|c| [c.r as f32, c.g as f32, c.b as f32])
                 .collect();
             for t in targets {
-                out.push(lut.correct_color(*t));
+                let col = if need_sat { super::apply_saturation(*t, saturation) } else { *t };
+                out.push(lut.correct_color(col));
             }
             return;
         }
@@ -86,7 +90,8 @@ impl TemporalSmoother {
                 curr[1].round() as u8,
                 curr[2].round() as u8,
             );
-            out.push(lut.correct_color(raw));
+            let col = if need_sat { super::apply_saturation(raw, saturation) } else { raw };
+            out.push(lut.correct_color(col));
         }
     }
 
@@ -127,12 +132,20 @@ mod tests {
         let mut out = Vec::new();
 
         let black = vec![RgbColor::BLACK];
-        smoother.smooth_into(&black, 0.5, &lut, &mut out);
+        smoother.smooth_into(&black, 0.5, &lut, 1.0, &mut out);
         assert_eq!(out[0], RgbColor::BLACK);
 
         let white = vec![RgbColor::WHITE];
-        smoother.smooth_into(&white, 0.5, &lut, &mut out);
+        smoother.smooth_into(&white, 0.5, &lut, 1.0, &mut out);
         assert_eq!(out[0], RgbColor::new(128, 128, 128));
+
+        // Проверка с насыщенностью 0.0 (ч/б)
+        let mut out_bw = Vec::new();
+        let mut bw_smoother = TemporalSmoother::new();
+        let red = vec![RgbColor::new(255, 0, 0)];
+        bw_smoother.smooth_into(&red, 0.0, &lut, 0.0, &mut out_bw);
+        assert_eq!(out_bw[0].r, out_bw[0].g);
+        assert_eq!(out_bw[0].g, out_bw[0].b);
     }
 }
 

@@ -46,6 +46,11 @@ struct ConfigUpdate {
     wled_host: Option<String>,
     wled_port: Option<u16>,
     wled_protocol: Option<String>,
+    white_balance_r: Option<f32>,
+    white_balance_g: Option<f32>,
+    white_balance_b: Option<f32>,
+    black_level_threshold: Option<u8>,
+    saturation_boost: Option<f32>,
     hotkeys: Option<HotkeysConfig>,
 }
 
@@ -79,6 +84,11 @@ struct ApiStatusResponse {
     wled_host: String,
     wled_port: u16,
     wled_protocol: String,
+    white_balance_r: f32,
+    white_balance_g: f32,
+    white_balance_b: f32,
+    black_level_threshold: u8,
+    saturation_boost: f32,
     selected_monitor: usize,
     monitors: Vec<ApiMonitorInfo>,
     led_count: usize,
@@ -413,6 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut cached_target_fps: u32 = 30;
             let mut cached_target_interval: Duration = Duration::from_millis(33);
             let mut cached_letterbox: bool = true;
+            let mut cached_saturation: f32 = 1.0;
             let mut cached_lut = GammaLut::new(1.0, 2.2);
             let mut final_colors_buf: Vec<RgbColor> = Vec::new();
 
@@ -436,7 +447,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cached_target_fps = cfg.target_fps;
                     cached_target_interval = Duration::from_millis(1000 / (cfg.target_fps.clamp(10, 120) as u64));
                     cached_letterbox = cfg.letterbox_detection;
-                    cached_lut = GammaLut::new(cfg.brightness, cfg.gamma);
+                    cached_saturation = cfg.saturation_boost;
+                    cached_lut = GammaLut::new_calibrated(
+                        cfg.brightness,
+                        cfg.gamma,
+                        cfg.white_balance_r,
+                        cfg.white_balance_g,
+                        cfg.white_balance_b,
+                        cfg.black_level_threshold,
+                    );
 
                     // Энергосбережение WASAPI: опрос звука активен только в режиме светомузыки
                     audio_ref.set_active(cached_mode == "music" && cached_is_active);
@@ -562,8 +581,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if frame_captured {
-                        // Высокопроизводительное сглаживание по месту и мгновенная LUT-коррекция без промежуточных аллокаций
-                        smoother.smooth_into(&last_sampled, cached_smoothing, &cached_lut, &mut final_colors_buf);
+                        // Высокопроизводительное сглаживание по месту, коррекция насыщенности и LUT без промежуточных аллокаций
+                        smoother.smooth_into(
+                            &last_sampled,
+                            cached_smoothing,
+                            &cached_lut,
+                            cached_saturation,
+                            &mut final_colors_buf,
+                        );
 
                         {
                             let mut out = colors_ref.write();
@@ -715,6 +740,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         wled_host: cfg.wled_host.clone(),
                         wled_port: cfg.wled_port,
                         wled_protocol: cfg.wled_protocol.clone(),
+                        white_balance_r: cfg.white_balance_r,
+                        white_balance_g: cfg.white_balance_g,
+                        white_balance_b: cfg.white_balance_b,
+                        black_level_threshold: cfg.black_level_threshold,
+                        saturation_boost: cfg.saturation_boost,
                         selected_monitor: cfg.selected_monitor,
                         monitors,
                         led_count: cfg.zones.len(),
@@ -870,6 +900,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 println!("[API] Смена WLED протокола: {}", wpr);
                                 cfg.wled_protocol = wpr;
                                 recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(wr) = update.white_balance_r {
+                                cfg.white_balance_r = wr.clamp(0.0, 2.0);
+                            }
+                            if let Some(wg) = update.white_balance_g {
+                                cfg.white_balance_g = wg.clamp(0.0, 2.0);
+                            }
+                            if let Some(wb) = update.white_balance_b {
+                                cfg.white_balance_b = wb.clamp(0.0, 2.0);
+                            }
+                            if let Some(bt) = update.black_level_threshold {
+                                cfg.black_level_threshold = bt.min(100);
+                            }
+                            if let Some(sb) = update.saturation_boost {
+                                cfg.saturation_boost = sb.clamp(0.0, 2.0);
                             }
                             if let Some(true) = update.reconnect {
                                 println!("[API] Запрос принудительного аппаратного сброса/переподключения контроллера");

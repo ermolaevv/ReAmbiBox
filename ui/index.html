@@ -102,6 +102,56 @@
             </label>
           </div>
 
+          <div class="card" style="grid-column: 1 / -1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+              <h3 style="margin: 0;">Калибровка цвета под интерьер (Баланс белого и чёрного)</h3>
+              <button id="btn-reset-calibration" class="btn btn-secondary" style="font-size: 12px; padding: 4px 10px;">Сбросить по умолчанию</button>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+              <!-- Баланс белого: R, G, B -->
+              <div style="background: rgba(0,0,0,0.25); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-color);">Баланс белого (R / G / B Gain)</div>
+                <div class="wb-slider-row">
+                  <span style="color: #ef4444; font-weight: 700; width: 16px;">R</span>
+                  <input type="range" id="slider-wb-r" class="slider-red" min="0" max="200" value="100">
+                  <span id="val-wb-r" class="wb-val">1.00x</span>
+                </div>
+                <div class="wb-slider-row" style="margin-top: 8px;">
+                  <span style="color: #22c55e; font-weight: 700; width: 16px;">G</span>
+                  <input type="range" id="slider-wb-g" class="slider-green" min="0" max="200" value="100">
+                  <span id="val-wb-g" class="wb-val">1.00x</span>
+                </div>
+                <div class="wb-slider-row" style="margin-top: 8px;">
+                  <span style="color: #3b82f6; font-weight: 700; width: 16px;">B</span>
+                  <input type="range" id="slider-wb-b" class="slider-blue" min="0" max="200" value="100">
+                  <span id="val-wb-b" class="wb-val">1.00x</span>
+                </div>
+              </div>
+
+              <!-- Насыщенность и Порог отсечки черного -->
+              <div style="background: rgba(0,0,0,0.25); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; justify-content: space-around; gap: 12px;">
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px;">
+                    <span>Отсечка чёрного (Black Level):</span>
+                    <span id="val-black-threshold" style="color: var(--primary-color);">Выкл (0)</span>
+                  </div>
+                  <input type="range" id="slider-black-threshold" min="0" max="50" value="0" style="width: 100%;">
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Гасит ленту в тёмных сценах (рекомендуется 5–15)</div>
+                </div>
+
+                <div>
+                  <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px;">
+                    <span>Насыщенность (Saturation Boost):</span>
+                    <span id="val-saturation" style="color: var(--primary-color);">100%</span>
+                  </div>
+                  <input type="range" id="slider-saturation" min="0" max="200" value="100" style="width: 100%;">
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Делает цвета сочнее без искажения оттенков</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="card" style="grid-column: 1 / -1; background: rgba(30, 34, 45, 0.7); border: 1px solid rgba(255, 255, 255, 0.08);">
             <h3 style="margin-bottom: 8px;">Глобальные горячие клавиши Windows</h3>
             <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-muted);">

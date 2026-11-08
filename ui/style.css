@@ -434,3 +434,34 @@ body {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.4);
 }
+
+.wb-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-slider-row input[type="range"] {
+  flex: 1;
+}
+
+.wb-val {
+  min-width: 48px;
+  font-weight: 600;
+  font-size: 13px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.slider-red::-webkit-slider-thumb {
+  background: #ef4444 !important;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6) !important;
+}
+.slider-green::-webkit-slider-thumb {
+  background: #22c55e !important;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6) !important;
+}
+.slider-blue::-webkit-slider-thumb {
+  background: #3b82f6 !important;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.6) !important;
+}
