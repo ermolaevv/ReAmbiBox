@@ -5,10 +5,11 @@ use std::sync::Arc;
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-    FillRect, InvalidateRect, Rectangle, SelectObject, SetBkMode, SetTextColor,
-    DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_BOLD, HDC,
-    PAINTSTRUCT, PS_SOLID, TRANSPARENT,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
+    CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
+    InvalidateRect, Rectangle, SelectObject, SetBkMode, SetTextColor,
+    DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
+    PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
@@ -195,13 +196,7 @@ unsafe extern "system" fn overlay_wnd_proc(
         }
 
         WM_ERASEBKGND => {
-            // Фон заливается цветом прозрачности RGB(0,0,0)
-            let hdc = HDC(wparam.0 as _);
-            let mut rc = RECT::default();
-            let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rc);
-            let brush = CreateSolidBrush(COLORREF(0x00000000));
-            FillRect(hdc, &rc, brush);
-            let _ = DeleteObject(brush);
+            // При двойной буферизации фон очищается в памяти, предотвращая мерцание
             LRESULT(1)
         }
 
@@ -210,23 +205,41 @@ unsafe extern "system" fn overlay_wnd_proc(
             let hdc = BeginPaint(hwnd, &mut ps);
 
             if let Some(ref state) = *GLOBAL_OVERLAY.lock() {
-                let (zones, screen_w, screen_h) = {
+                let screen_w = state.screen_width;
+                let screen_h = state.screen_height;
+                let (zones, sw_f32, sh_f32) = {
                     let cfg = state.config.read();
-                    (cfg.zones.clone(), state.screen_width as f32, state.screen_height as f32)
+                    (cfg.zones.clone(), screen_w as f32, screen_h as f32)
                 };
+
+                // Двойная буферизация в памяти для исключения шлейфов и мерцания
+                let mem_dc = CreateCompatibleDC(hdc);
+                let mem_bmp = CreateCompatibleBitmap(hdc, screen_w, screen_h);
+                let old_bmp = SelectObject(mem_dc, mem_bmp);
+
+                // Очищаем весь буфер цветом прозрачности RGB(0,0,0)
+                let rc_full = RECT {
+                    left: 0,
+                    top: 0,
+                    right: screen_w,
+                    bottom: screen_h,
+                };
+                let bg_brush = CreateSolidBrush(COLORREF(0x00000000));
+                FillRect(mem_dc, &rc_full, bg_brush);
+                let _ = DeleteObject(bg_brush);
 
                 // Создаем шрифты для отображения номеров зон и плашки
                 let h_font = CreateFontW(
                     14, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, w!("Segoe UI"),
                 );
-                let old_font = SelectObject(hdc, h_font);
-                SetBkMode(hdc, TRANSPARENT);
+                let old_font = SelectObject(mem_dc, h_font);
+                SetBkMode(mem_dc, TRANSPARENT);
 
                 // Отрисовка плашки подсказки вверху по центру
                 {
                     let banner_w = 640;
                     let banner_h = 36;
-                    let banner_x = (screen_w as i32 - banner_w) / 2;
+                    let banner_x = (screen_w - banner_w) / 2;
                     let banner_y = 16;
                     let rc_banner = RECT {
                         left: banner_x,
@@ -235,31 +248,31 @@ unsafe extern "system" fn overlay_wnd_proc(
                         bottom: banner_y + banner_h,
                     };
                     let brush = CreateSolidBrush(COLORREF(0x00151210)); // Темно-серый
-                    FillRect(hdc, &rc_banner, brush);
+                    FillRect(mem_dc, &rc_banner, brush);
                     let _ = DeleteObject(brush);
 
                     let pen = CreatePen(PS_SOLID, 1, COLORREF(0x00EB8030)); // Оранжевая рамка
-                    let old_pen = SelectObject(hdc, pen);
-                    let _ = Rectangle(hdc, banner_x, banner_y, banner_x + banner_w, banner_y + banner_h);
-                    SelectObject(hdc, old_pen);
+                    let old_pen = SelectObject(mem_dc, pen);
+                    let _ = Rectangle(mem_dc, banner_x, banner_y, banner_x + banner_w, banner_y + banner_h);
+                    SelectObject(mem_dc, old_pen);
                     let _ = DeleteObject(pen);
 
-                    SetTextColor(hdc, COLORREF(0x00FFFFFF));
-                    let mut text: Vec<u16> = "ReAmbiBox — Калибровка зон | Тяните мышью | Esc: Сохранить и закрыть\0"
+                    SetTextColor(mem_dc, COLORREF(0x00FFFFFF));
+                    let mut text: Vec<u16> = "ReAmbiBox — Настройка зон | Перетаскивайте мышкой | Esc: Сохранить и закрыть\0"
                         .encode_utf16()
                         .collect();
                     let mut rc_text = rc_banner;
-                    DrawTextW(hdc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    DrawTextW(mem_dc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 }
 
-                // Отрисовка всех зон экрана
+                // Отрисовка всех зон экрана в буфер памяти
                 for zone in &zones {
                     let is_active = state.active_zone_id == Some(zone.id);
 
-                    let zx = (zone.rect.x * screen_w).round() as i32;
-                    let zy = (zone.rect.y * screen_h).round() as i32;
-                    let zw = (zone.rect.width * screen_w).round().max(16.0) as i32;
-                    let zh = (zone.rect.height * screen_h).round().max(16.0) as i32;
+                    let zx = (zone.rect.x * sw_f32).round() as i32;
+                    let zy = (zone.rect.y * sh_f32).round() as i32;
+                    let zw = (zone.rect.width * sw_f32).round().max(16.0) as i32;
+                    let zh = (zone.rect.height * sh_f32).round().max(16.0) as i32;
 
                     let rc_zone = RECT {
                         left: zx,
@@ -275,7 +288,7 @@ unsafe extern "system" fn overlay_wnd_proc(
                         COLORREF(0x003A2018) // Полупрозрачный темно-синий
                     };
                     let brush = CreateSolidBrush(fill_color);
-                    FillRect(hdc, &rc_zone, brush);
+                    FillRect(mem_dc, &rc_zone, brush);
                     let _ = DeleteObject(brush);
 
                     // Рамка зоны (активная: толстая ярко-голубая, обычные: розовая/фиолетовая)
@@ -285,12 +298,12 @@ unsafe extern "system" fn overlay_wnd_proc(
                         COLORREF(0x00C832D0) // Фиолетово-розовая
                     };
                     let pen = CreatePen(PS_SOLID, if is_active { 2 } else { 1 }, border_color);
-                    let old_pen = SelectObject(hdc, pen);
+                    let old_pen = SelectObject(mem_dc, pen);
 
-                    let old_brush = SelectObject(hdc, windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH));
-                    let _ = Rectangle(hdc, zx, zy, zx + zw, zy + zh);
-                    SelectObject(hdc, old_brush);
-                    SelectObject(hdc, old_pen);
+                    let old_brush = SelectObject(mem_dc, windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH));
+                    let _ = Rectangle(mem_dc, zx, zy, zx + zw, zy + zh);
+                    SelectObject(mem_dc, old_brush);
+                    SelectObject(mem_dc, old_pen);
                     let _ = DeleteObject(pen);
 
                     // Маркер ресайза в правом нижнем углу
@@ -303,13 +316,13 @@ unsafe extern "system" fn overlay_wnd_proc(
                             right: zx + zw,
                             bottom: zy + zh,
                         };
-                        FillRect(hdc, &rc_handle, handle_brush);
+                        FillRect(mem_dc, &rc_handle, handle_brush);
                         let _ = DeleteObject(handle_brush);
                     }
 
                     // Номер зоны по центру с контрастной обводкой
                     let mut num_text: Vec<u16> = format!("{}\0", zone.id + 1).encode_utf16().collect();
-                    SetTextColor(hdc, COLORREF(0x00000000)); // Черная тень/обводка
+                    SetTextColor(mem_dc, COLORREF(0x00000000)); // Черная тень/обводка
                     for (dx, dy) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
                         let mut rc_shadow = RECT {
                             left: rc_zone.left + dx,
@@ -318,16 +331,23 @@ unsafe extern "system" fn overlay_wnd_proc(
                             bottom: rc_zone.bottom + dy,
                         };
                         let mut num_text_shadow = num_text.clone();
-                        DrawTextW(hdc, &mut num_text_shadow, &mut rc_shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                        DrawTextW(mem_dc, &mut num_text_shadow, &mut rc_shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                     }
 
-                    SetTextColor(hdc, if is_active { COLORREF(0x0000FFFF) } else { COLORREF(0x00FFFFFF) });
+                    SetTextColor(mem_dc, if is_active { COLORREF(0x0000FFFF) } else { COLORREF(0x00FFFFFF) });
                     let mut rc_num = rc_zone;
-                    DrawTextW(hdc, &mut num_text, &mut rc_num, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    DrawTextW(mem_dc, &mut num_text, &mut rc_num, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 }
 
-                SelectObject(hdc, old_font);
+                SelectObject(mem_dc, old_font);
                 let _ = DeleteObject(h_font);
+
+                // Мгновенный аппаратный перенос кадра на экран (без шлейфов и артефактов)
+                let _ = BitBlt(hdc, 0, 0, screen_w, screen_h, mem_dc, 0, 0, SRCCOPY);
+
+                SelectObject(mem_dc, old_bmp);
+                let _ = DeleteObject(mem_bmp);
+                let _ = DeleteDC(mem_dc);
             }
 
             let _ = EndPaint(hwnd, &ps);
