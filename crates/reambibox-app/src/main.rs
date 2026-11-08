@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 
 #[derive(Debug, Deserialize)]
 struct ConfigUpdate {
@@ -70,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - Режим: {}, Яркость: {:.0}%, Сглаживание: {:.2}, Гамма: {:.1}",
              initial_cfg.mode, initial_cfg.brightness * 100.0, initial_cfg.smoothing, initial_cfg.gamma);
 
-    let shared_config = Arc::new(RwLock::new(initial_cfg.clone()));
+    let shared_config = Arc::new(parking_lot::RwLock::new(initial_cfg.clone()));
     let shared_state = create_shared_state();
     {
         let mut s = shared_state.write().await;
@@ -82,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Разделяемые структуры между потоками захвата, вывода и веб-сервера
     let output_colors = Arc::new(parking_lot::RwLock::new(vec![RgbColor::BLACK; initial_cfg.zones.len()]));
-    let serial_status = Arc::new(parking_lot::RwLock::new(String::from("Инициализация...")));
+    let serial_status = Arc::new(parking_lot::RwLock::new(String::from("Поиск устройства...")));
     let serial_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
     let capture_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
     let is_running = Arc::new(AtomicBool::new(true));
@@ -103,14 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cfg_ref = Arc::clone(&shared_config);
 
         std::thread::spawn(move || {
-            let initial = {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async { cfg_ref.read().await.clone() })
+            let (mut port_name, baud_rate, mut color_order) = {
+                let cfg = cfg_ref.read();
+                (cfg.serial_port.clone(), cfg.baud_rate, cfg.color_order.clone())
             };
-
-            let mut port_name = initial.serial_port.clone();
-            let baud_rate = initial.baud_rate;
-            let mut color_order = initial.color_order.clone();
 
             let mut driver = AdalightDriver::new(&port_name, baud_rate);
             driver.set_color_order(&color_order);
@@ -126,7 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let start = Instant::now();
 
                 // Периодическая проверка смены настроек порта / порядка цветов
-                if let Ok(cfg) = cfg_ref.try_read() {
+                {
+                    let cfg = cfg_ref.read();
                     if cfg.serial_port != port_name {
                         port_name = cfg.serial_port.clone();
                         let _ = driver.disconnect();
@@ -193,7 +189,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let colors_ref = Arc::clone(&output_colors);
         let cfg_ref = Arc::clone(&shared_config);
-        let state_ref = Arc::clone(&shared_state);
         let fps_ref = Arc::clone(&capture_fps);
         let run_ref = Arc::clone(&is_running);
 
@@ -208,23 +203,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             while run_ref.load(Ordering::Relaxed) {
                 let start = Instant::now();
 
-                // Читаем актуальные параметры синхронно
+                // Читаем актуальные параметры синхронно из parking_lot::RwLock
                 let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones) = {
-                    if let (Ok(cfg), Ok(st)) = (cfg_ref.try_read(), state_ref.try_read()) {
-                        (
-                            cfg.selected_monitor,
-                            st.is_active,
-                            cfg.brightness,
-                            cfg.smoothing,
-                            cfg.gamma,
-                            cfg.mode.clone(),
-                            cfg.static_color,
-                            cfg.zones.clone(),
-                        )
-                    } else {
-                        std::thread::sleep(Duration::from_millis(10));
-                        continue;
-                    }
+                    let cfg = cfg_ref.read();
+                    (
+                        cfg.selected_monitor,
+                        cfg.is_active,
+                        cfg.brightness,
+                        cfg.smoothing,
+                        cfg.gamma,
+                        cfg.mode.clone(),
+                        cfg.static_color,
+                        cfg.zones.clone(),
+                    )
                 };
 
                 let led_count = zones.len();
@@ -401,8 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // API: GET /api/config
                 if req_text.starts_with("GET /api/config") {
-                    let cfg = config_ref.read().await;
-                    let state = state_ref.read().await;
+                    let cfg = config_ref.read().clone();
                     let c_fps = *c_fps_ref.read();
                     let s_fps = *s_fps_ref.read();
                     let port_status = status_ref.read().clone();
@@ -420,7 +410,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .collect();
 
                     let res_obj = ApiStatusResponse {
-                        is_active: state.is_active,
+                        is_active: cfg.is_active,
                         capture_fps: c_fps,
                         serial_fps: s_fps,
                         brightness: cfg.brightness,
@@ -453,28 +443,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(pos) = req_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
                         let body_slice = &req_bytes[pos + 4..];
                         if let Ok(update) = serde_json::from_slice::<ConfigUpdate>(body_slice) {
-                            let mut cfg = config_ref.write().await;
-                            let mut state = state_ref.write().await;
+                            let mut cfg = config_ref.write();
 
                             if let Some(b) = update.brightness {
                                 cfg.brightness = b;
-                                state.brightness = b;
                                 println!("[API] Яркость изменена: {:.0}%", b * 100.0);
+                                if let Ok(mut st) = state_ref.try_write() {
+                                    st.brightness = b;
+                                }
                             }
                             if let Some(s) = update.smoothing {
                                 cfg.smoothing = s;
-                                state.smooth = s;
+                                if let Ok(mut st) = state_ref.try_write() {
+                                    st.smooth = s;
+                                }
                             }
                             if let Some(g) = update.gamma {
                                 cfg.gamma = g;
-                                state.gamma = g;
+                                if let Ok(mut st) = state_ref.try_write() {
+                                    st.gamma = g;
+                                }
                             }
                             if let Some(lb) = update.letterbox {
                                 cfg.letterbox_detection = lb;
                             }
                             if let Some(act) = update.is_active {
-                                state.is_active = act;
+                                cfg.is_active = act;
                                 println!("[API] Питание: {}", if act { "ВКЛ" } else { "ВЫКЛ" });
+                                if let Ok(mut st) = state_ref.try_write() {
+                                    st.is_active = act;
+                                }
                             }
                             if let Some(m) = update.mode {
                                 println!("[API] Режим изменен на: {}", m);
@@ -528,7 +526,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::time::sleep(Duration::from_secs(3)).await;
         if stats_timer.elapsed() >= Duration::from_secs(3) {
-            let cfg = shared_config.read().await;
+            let cfg = shared_config.read().clone();
             let c_fps = *capture_fps.read();
             let s_fps = *serial_fps.read();
             let status = serial_status.read().clone();
