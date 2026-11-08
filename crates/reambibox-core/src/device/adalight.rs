@@ -12,6 +12,7 @@ pub struct AdalightDriver {
     color_order: String,
     last_led_count: usize,
     port: Option<Box<dyn SerialPort>>,
+    packet_buffer: Vec<u8>,
 }
 
 impl AdalightDriver {
@@ -25,6 +26,7 @@ impl AdalightDriver {
             color_order: "RGB".to_string(),
             last_led_count: 98,
             port: None,
+            packet_buffer: Vec::with_capacity(6 + 98 * 3),
         }
     }
 
@@ -62,8 +64,12 @@ impl AdalightDriver {
         }
     }
 
-    /// Формирование полного бинарного пакета протокола Adalight с учетом порядка цветов
-    pub fn build_packet_with_order(colors: &[RgbColor], order: &str) -> Result<Vec<u8>, DeviceError> {
+    /// Запись бинарного пакета Adalight в переданный буфер без аллокаций
+    pub fn write_packet_with_order(
+        colors: &[RgbColor],
+        order: &str,
+        packet: &mut Vec<u8>,
+    ) -> Result<(), DeviceError> {
         let count = colors.len();
         if count == 0 {
             return Err(DeviceError::InvalidLedCount(0));
@@ -76,7 +82,8 @@ impl AdalightDriver {
         let lo = ((count - 1) & 0xFF) as u8;
         let checksum = hi ^ lo ^ 0x55;
 
-        let mut packet = Vec::with_capacity(6 + count * 3);
+        packet.clear();
+        packet.reserve(6 + count * 3);
         packet.extend_from_slice(&Self::MAGIC_HEADER);
         packet.push(hi);
         packet.push(lo);
@@ -101,6 +108,13 @@ impl AdalightDriver {
             }
         }
 
+        Ok(())
+    }
+
+    /// Формирование полного бинарного пакета протокола Adalight с учетом порядка цветов
+    pub fn build_packet_with_order(colors: &[RgbColor], order: &str) -> Result<Vec<u8>, DeviceError> {
+        let mut packet = Vec::with_capacity(6 + colors.len() * 3);
+        Self::write_packet_with_order(colors, order, &mut packet)?;
         Ok(packet)
     }
 
@@ -183,14 +197,14 @@ impl DeviceDriver for AdalightDriver {
 
     fn send_frame(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError> {
         self.last_led_count = frame.colors.len();
-        let packet = Self::build_packet_with_order(&frame.colors, &self.color_order)?;
+        Self::write_packet_with_order(&frame.colors, &self.color_order, &mut self.packet_buffer)?;
 
         let port = match self.port.as_mut() {
             Some(p) => p,
             None => return Err(DeviceError::NotConnected),
         };
 
-        if let Err(e) = port.write_all(&packet) {
+        if let Err(e) = port.write_all(&self.packet_buffer) {
             error!("Ошибка записи кадра в порт {}: {}", self.port_name, e);
             self.port = None; // Сбрасываем порт при обрыве связи для автопереподключения
             return Err(DeviceError::IoError(e));

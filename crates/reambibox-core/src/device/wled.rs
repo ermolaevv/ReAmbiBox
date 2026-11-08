@@ -46,6 +46,7 @@ pub struct WledDriver {
     last_led_count: usize,
     sequence: u8,
     socket: Option<UdpSocket>,
+    packet_buffer: Vec<u8>,
 }
 
 impl WledDriver {
@@ -61,6 +62,7 @@ impl WledDriver {
             last_led_count: 98,
             sequence: 1,
             socket: None,
+            packet_buffer: Vec::with_capacity(10 + 98 * 3),
         }
     }
 
@@ -89,6 +91,40 @@ impl WledDriver {
             "GBR" => (color.g, color.b, color.r),
             _ => (color.r, color.g, color.b), // "RGB" по умолчанию
         }
+    }
+
+    /// Запись одиночного DDP пакета в переиспользуемый буфер без выделения памяти
+    pub fn write_single_ddp_packet(
+        colors: &[RgbColor],
+        color_order: &str,
+        sequence: u8,
+        out: &mut Vec<u8>,
+    ) -> Result<(), DeviceError> {
+        let count = colors.len();
+        if count == 0 {
+            return Err(DeviceError::InvalidLedCount(0));
+        }
+
+        out.clear();
+        let data_len = (count * 3) as u16;
+        let flags: u8 = 0x40 | 0x01; // Push immediately
+
+        out.reserve(10 + count * 3);
+        out.push(flags);
+        out.push(sequence & 0x0F);
+        out.push(0x01); // RGB 24-bit
+        out.push(0x01); // Destination ID: 1
+        out.extend_from_slice(&0u32.to_be_bytes()); // offset = 0
+        out.extend_from_slice(&data_len.to_be_bytes());
+
+        for color in colors {
+            let (c1, c2, c3) = Self::reorder_color(color, color_order);
+            out.push(c1);
+            out.push(c2);
+            out.push(c3);
+        }
+
+        Ok(())
     }
 
     /// Формирование одного или нескольких DDP UDP пакетов
@@ -141,12 +177,13 @@ impl WledDriver {
         Ok(packets)
     }
 
-    /// Формирование UDP пакета по протоколу WLED WARLS (до 255 диодов)
-    pub fn build_warls_packet(
+    /// Запись пакета по протоколу WLED WARLS в переиспользуемый буфер (до 255 диодов)
+    pub fn write_warls_packet(
         colors: &[RgbColor],
         color_order: &str,
         timeout_seconds: u8,
-    ) -> Result<Vec<u8>, DeviceError> {
+        out: &mut Vec<u8>,
+    ) -> Result<(), DeviceError> {
         let count = colors.len();
         if count == 0 {
             return Err(DeviceError::InvalidLedCount(0));
@@ -157,20 +194,31 @@ impl WledDriver {
             ));
         }
 
-        // Заголовок WARLS: [0x02, timeout_seconds]
-        let mut packet = Vec::with_capacity(2 + count * 4);
-        packet.push(0x02);
-        packet.push(timeout_seconds.max(1));
+        out.clear();
+        out.reserve(2 + count * 4);
+        out.push(0x02);
+        out.push(timeout_seconds.max(1));
 
         for (i, color) in colors.iter().enumerate() {
             let (c1, c2, c3) = Self::reorder_color(color, color_order);
-            packet.push(i as u8);
-            packet.push(c1);
-            packet.push(c2);
-            packet.push(c3);
+            out.push(i as u8);
+            out.push(c1);
+            out.push(c2);
+            out.push(c3);
         }
 
-        Ok(packet)
+        Ok(())
+    }
+
+    /// Формирование UDP пакета по протоколу WLED WARLS (до 255 диодов)
+    pub fn build_warls_packet(
+        colors: &[RgbColor],
+        color_order: &str,
+        timeout_seconds: u8,
+    ) -> Result<Vec<u8>, DeviceError> {
+        let mut buf = Vec::new();
+        Self::write_warls_packet(colors, color_order, timeout_seconds, &mut buf)?;
+        Ok(buf)
     }
 
     /// Экстренное выключение подсветки WLED по сети (без необходимости сохранять драйвер)
@@ -235,28 +283,45 @@ impl DeviceDriver for WledDriver {
 
         match self.protocol {
             WledProtocol::Ddp => {
-                let packets = Self::build_ddp_packets(
-                    &frame.colors,
-                    &self.color_order,
-                    self.sequence,
-                )?;
-
-                for packet in packets {
-                    socket.send(&packet).map_err(|e| {
+                if frame.colors.is_empty() {
+                    return Err(DeviceError::InvalidLedCount(0));
+                }
+                if frame.colors.len() <= Self::MAX_LEDS_PER_DDP_PACKET {
+                    Self::write_single_ddp_packet(
+                        &frame.colors,
+                        &self.color_order,
+                        self.sequence,
+                        &mut self.packet_buffer,
+                    )?;
+                    socket.send(&self.packet_buffer).map_err(|e| {
                         error!("Ошибка отправки DDP пакета WLED: {}", e);
                         DeviceError::IoError(e)
                     })?;
+                } else {
+                    let packets = Self::build_ddp_packets(
+                        &frame.colors,
+                        &self.color_order,
+                        self.sequence,
+                    )?;
+
+                    for packet in packets {
+                        socket.send(&packet).map_err(|e| {
+                            error!("Ошибка отправки DDP пакета WLED: {}", e);
+                            DeviceError::IoError(e)
+                        })?;
+                    }
                 }
                 self.sequence = self.sequence.wrapping_add(1);
             }
             WledProtocol::Warls => {
-                let packet = Self::build_warls_packet(
+                Self::write_warls_packet(
                     &frame.colors,
                     &self.color_order,
                     2, // 2 секунды удержания кадра в WLED
+                    &mut self.packet_buffer,
                 )?;
 
-                socket.send(&packet).map_err(|e| {
+                socket.send(&self.packet_buffer).map_err(|e| {
                     error!("Ошибка отправки WARLS пакета WLED: {}", e);
                     DeviceError::IoError(e)
                 })?;
@@ -366,5 +431,21 @@ mod tests {
         assert_eq!(&pkt[2..6], &[0, 100, 150, 200]);
         // Диод 1: [index=1, 50, 60, 70]
         assert_eq!(&pkt[6..10], &[1, 50, 60, 70]);
+    }
+
+    #[test]
+    fn test_write_single_ddp_packet_matches_build() {
+        let colors = vec![
+            RgbColor::new(10, 20, 30),
+            RgbColor::new(40, 50, 60),
+            RgbColor::new(70, 80, 90),
+        ];
+
+        let built_packets = WledDriver::build_ddp_packets(&colors, "RGB", 3).unwrap();
+        let mut buf = Vec::new();
+        WledDriver::write_single_ddp_packet(&colors, "RGB", 3, &mut buf).unwrap();
+
+        assert_eq!(built_packets.len(), 1);
+        assert_eq!(&buf, &built_packets[0]);
     }
 }

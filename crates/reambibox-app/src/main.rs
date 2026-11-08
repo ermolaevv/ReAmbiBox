@@ -9,6 +9,7 @@ mod zone_overlay;
 use reambibox_core::api::lightpack::LightpackServer;
 use reambibox_core::api::state::create_shared_state;
 use reambibox_core::capture::dxgi::DxgiCapture;
+use reambibox_core::color::lut::GammaLut;
 use reambibox_core::color::smoothing::TemporalSmoother;
 use reambibox_core::config::{AppConfig, HotkeysConfig};
 use reambibox_core::device::adalight::AdalightDriver;
@@ -216,9 +217,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let reconnect_ref = Arc::clone(&needs_reconnect);
 
         std::thread::spawn(move || {
-            let mut current_cfg = {
+            let (mut current_cfg, mut cached_ver, mut target_fps, mut led_count, mut baud, mut is_wled) = {
                 let cfg = cfg_ref.read();
-                cfg.clone()
+                (
+                    cfg.clone(),
+                    cfg.version(),
+                    cfg.target_fps,
+                    cfg.zones.len(),
+                    cfg.baud_rate,
+                    cfg.output_type.to_lowercase() == "wled",
+                )
             };
 
             fn create_driver(cfg: &AppConfig) -> Box<dyn DeviceDriver> {
@@ -246,11 +254,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Обработка ручного запроса переподключения/сброса контроллера
                 let force_recon = reconnect_ref.swap(false, Ordering::Relaxed);
+                let cur_ver = cfg_ref.read().version();
 
-                // Периодическая проверка смены конфигурации
-                let (should_recreate, target_fps, led_count, baud, is_wled) = {
+                let mut should_recreate = force_recon;
+                if cur_ver != cached_ver {
                     let cfg = cfg_ref.read();
-                    let is_wled = cfg.output_type.to_lowercase() == "wled";
+                    let new_is_wled = cfg.output_type.to_lowercase() == "wled";
                     let hardware_changed = cfg.output_type != current_cfg.output_type
                         || cfg.serial_port != current_cfg.serial_port
                         || cfg.baud_rate != current_cfg.baud_rate
@@ -259,12 +268,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         || cfg.wled_protocol != current_cfg.wled_protocol
                         || cfg.color_order != current_cfg.color_order;
 
-                    let needs_new_driver = hardware_changed || force_recon;
-                    if needs_new_driver {
+                    if hardware_changed || force_recon {
+                        should_recreate = true;
                         current_cfg = cfg.clone();
                     }
-                    (needs_new_driver, cfg.target_fps, cfg.zones.len(), cfg.baud_rate, is_wled)
-                };
+                    cached_ver = cur_ver;
+                    target_fps = cfg.target_fps;
+                    led_count = cfg.zones.len();
+                    baud = cfg.baud_rate;
+                    is_wled = new_is_wled;
+                }
 
                 if should_recreate {
                     println!("[Output] Переинициализация драйвера вывода...");
@@ -372,6 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let run_ref = Arc::clone(&is_running);
         let tray_ref = Arc::clone(&tray_manager);
         let bands_ref = Arc::clone(&wasapi_bands);
+        let audio_ref = Arc::clone(&audio_capture);
 
         std::thread::spawn(move || {
             let mut current_mon: usize = 99999;
@@ -385,53 +399,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut frames_count: u64 = 0;
             let mut last_fps_time = Instant::now();
 
+            // Локальный кэш параметров конфигурации для полного устранения оверхеда на клонирование строк и зон
+            let mut cached_ver: u64 = 0;
+            let mut cached_mon_idx: usize = 0;
+            let mut cached_is_active: bool = true;
+            let mut cached_smoothing: f32 = 0.5;
+            let mut cached_mode: String = "screen".to_string();
+            let mut cached_static_color: [u8; 3] = [255, 255, 255];
+            let mut cached_zones: Vec<reambibox_core::color::zone::Zone> = Vec::new();
+            let mut cached_target_fps: u32 = 30;
+            let mut cached_target_interval: Duration = Duration::from_millis(33);
+            let mut cached_letterbox: bool = true;
+            let mut cached_lut = GammaLut::new(1.0, 2.2);
+            let mut final_colors_buf: Vec<RgbColor> = Vec::new();
+
             while run_ref.load(Ordering::Relaxed) {
                 let start = Instant::now();
 
                 // Проверяем активность дисплея (сон экрана или блокировка ПК)
                 let is_display_active = tray_ref.is_display_active();
 
-                // Читаем актуальные параметры синхронно из parking_lot::RwLock
-                let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones, target_fps, letterbox_enabled) = {
+                // Считываем обновленные параметры ТОЛЬКО при реальной смене версии конфигурации
+                let cur_ver = cfg_ref.read().version();
+                if cur_ver != cached_ver {
+                    cached_ver = cur_ver;
                     let cfg = cfg_ref.read();
-                    (
-                        cfg.selected_monitor,
-                        cfg.is_active,
-                        cfg.brightness,
-                        cfg.smoothing,
-                        cfg.gamma,
-                        cfg.mode.clone(),
-                        cfg.static_color,
-                        cfg.zones.clone(),
-                        cfg.target_fps,
-                        cfg.letterbox_detection,
-                    )
-                };
+                    cached_mon_idx = cfg.selected_monitor;
+                    cached_is_active = cfg.is_active;
+                    cached_smoothing = cfg.smoothing;
+                    cached_mode = cfg.mode.clone();
+                    cached_static_color = cfg.static_color;
+                    cached_zones = cfg.zones.clone();
+                    cached_target_fps = cfg.target_fps;
+                    cached_target_interval = Duration::from_millis(1000 / (cfg.target_fps.clamp(10, 120) as u64));
+                    cached_letterbox = cfg.letterbox_detection;
+                    cached_lut = GammaLut::new(cfg.brightness, cfg.gamma);
 
-                let target_interval = Duration::from_millis(1000 / (target_fps.clamp(10, 120) as u64));
+                    // Энергосбережение WASAPI: опрос звука активен только в режиме светомузыки
+                    audio_ref.set_active(cached_mode == "music" && cached_is_active);
+                }
 
-                let led_count = zones.len();
+                let led_count = cached_zones.len();
                 if last_sampled.len() != led_count {
                     last_sampled = vec![RgbColor::BLACK; led_count];
                 }
 
                 // Обработка состояния: Выключено или Дисплей спит / Сессия заблокирована
-                if !is_active || !is_display_active {
+                if !cached_is_active || !is_display_active {
                     {
                         let mut out = colors_ref.write();
-                        *out = vec![RgbColor::BLACK; led_count];
+                        out.clear();
+                        out.resize(led_count, RgbColor::BLACK);
                     }
                     std::thread::sleep(Duration::from_millis(50));
                     continue;
                 }
 
                 // Обработка режима: Статический тестовый цвет (White / Test)
-                if mode == "static" {
-                    let base = RgbColor::new(static_color[0], static_color[1], static_color[2]);
-                    let dimmed = base.with_brightness_gamma(brightness, gamma);
+                if cached_mode == "static" {
+                    let base = RgbColor::new(cached_static_color[0], cached_static_color[1], cached_static_color[2]);
+                    let dimmed = cached_lut.correct_color(base);
                     {
                         let mut out = colors_ref.write();
-                        *out = vec![dimmed; led_count];
+                        out.clear();
+                        out.resize(led_count, dimmed);
                     }
                     frames_count += 1;
                     if last_fps_time.elapsed() >= Duration::from_secs(1) {
@@ -444,20 +475,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // Обработка режима: Светомузыка (Audio Reactive / Music Visualizer)
-                if mode == "music" {
+                if cached_mode == "music" {
                     let bands = *bands_ref.read();
                     let (effect, sens) = {
                         let c = cfg_ref.read();
                         (c.audio_effect.clone(), c.audio_sensitivity)
                     };
                     let raw_leds = music_vis.render(bands, led_count, &effect, sens);
-                    let processed: Vec<RgbColor> = raw_leds
-                        .into_iter()
-                        .map(|c| c.with_brightness_gamma(brightness, gamma))
-                        .collect();
+                    final_colors_buf.clear();
+                    for c in raw_leds {
+                        final_colors_buf.push(cached_lut.correct_color(c));
+                    }
                     {
                         let mut out = colors_ref.write();
-                        *out = processed;
+                        out.clone_from(&final_colors_buf);
                     }
                     frames_count += 1;
                     if last_fps_time.elapsed() >= Duration::from_secs(1) {
@@ -470,15 +501,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // Обработка режима: Захват экрана (Screen Capture)
-                if mon_idx != current_mon || capture.is_none() {
-                    match DxgiCapture::new(mon_idx) {
+                if cached_mon_idx != current_mon || capture.is_none() {
+                    match DxgiCapture::new(cached_mon_idx) {
                         Ok(c) => {
-                            println!(">>> [OK] DXGI захват переключен на монитор {}", mon_idx);
+                            println!(">>> [OK] DXGI захват переключен на монитор {}", cached_mon_idx);
                             capture = Some(c);
-                            current_mon = mon_idx;
+                            current_mon = cached_mon_idx;
                         }
                         Err(e) => {
-                            eprintln!("Ошибка инициализации DXGI для монитора {}: {}", mon_idx, e);
+                            eprintln!("Ошибка инициализации DXGI для монитора {}: {}", cached_mon_idx, e);
                             std::thread::sleep(Duration::from_millis(500));
                             continue;
                         }
@@ -487,17 +518,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Some(ref mut cap) = capture {
                     let mut frame_captured = false;
-                    let timeout = Duration::from_millis((1000 / (target_fps.clamp(10, 120) as u64)).max(15));
+                    let timeout = Duration::from_millis((1000 / (cached_target_fps.clamp(10, 120) as u64)).max(15));
                     let res = cap.capture_frame_with(timeout, |view| {
                         // Если включен letterbox, обновляем геометрию раз в секунду
-                        if letterbox_enabled && last_letterbox_check.elapsed() >= Duration::from_secs(1) {
+                        if cached_letterbox && last_letterbox_check.elapsed() >= Duration::from_secs(1) {
                             last_letterbox_check = Instant::now();
                             active_viewport = letterbox_detector.detect(view);
                         }
 
                         // Высокопроизводительная адаптивная выборка цветов зон без аллокаций памяти
-                        if letterbox_enabled && (active_viewport.height < 0.95 || active_viewport.width < 0.95) {
-                            last_sampled = zones.iter().map(|z| {
+                        if cached_letterbox && (active_viewport.height < 0.95 || active_viewport.width < 0.95) {
+                            last_sampled = cached_zones.iter().map(|z| {
                                 let mut adjusted = z.clone();
                                 adjusted.rect.x = active_viewport.x + z.rect.x * active_viewport.width;
                                 adjusted.rect.y = active_viewport.y + z.rect.y * active_viewport.height;
@@ -506,7 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 adjusted.sample_color_adaptive(view)
                             }).collect();
                         } else {
-                            last_sampled = zones.iter().map(|z| z.sample_color_adaptive(view)).collect();
+                            last_sampled = cached_zones.iter().map(|z| z.sample_color_adaptive(view)).collect();
                         }
 
                         frames_count += 1;
@@ -528,18 +559,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if frame_captured {
-                        // Временное сглаживание
-                        let smoothed = smoother.smooth(&last_sampled, smoothing);
-
-                        // Коррекция яркости и гаммы в реальном времени
-                        let final_colors: Vec<_> = smoothed
-                            .into_iter()
-                            .map(|c| c.with_brightness_gamma(brightness, gamma))
-                            .collect();
+                        // Высокопроизводительное сглаживание по месту и мгновенная LUT-коррекция без промежуточных аллокаций
+                        smoother.smooth_into(&last_sampled, cached_smoothing, &cached_lut, &mut final_colors_buf);
 
                         {
                             let mut out = colors_ref.write();
-                            *out = final_colors;
+                            out.clone_from(&final_colors_buf);
                         }
                     }
                 }
@@ -551,8 +576,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let elapsed = start.elapsed();
-                if elapsed < target_interval {
-                    std::thread::sleep(target_interval - elapsed);
+                if elapsed < cached_target_interval {
+                    std::thread::sleep(cached_target_interval - elapsed);
                 }
             }
 
@@ -560,7 +585,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 let mut out = colors_ref.write();
                 let count = out.len();
-                *out = vec![RgbColor::BLACK; count];
+                out.clear();
+                out.resize(count, RgbColor::BLACK);
             }
         });
     }

@@ -211,13 +211,24 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> RgbColor {
 /// Высокопроизводительный захват звука Windows через WASAPI Loopback
 pub struct WasapiLoopbackCapture {
     is_running: Arc<AtomicBool>,
+    is_active: Arc<AtomicBool>,
 }
 
 impl WasapiLoopbackCapture {
     pub fn new() -> Self {
         Self {
             is_running: Arc::new(AtomicBool::new(false)),
+            is_active: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Управление активностью захвата (энергосбережение, когда светомузыка выключена)
+    pub fn set_active(&self, active: bool) {
+        self.is_active.store(active, Ordering::Relaxed);
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active.load(Ordering::Relaxed)
     }
 
     /// Запуск фонового потока захвата системного звука
@@ -226,6 +237,7 @@ impl WasapiLoopbackCapture {
         F: Fn(AudioBands) + Send + 'static,
     {
         let is_running = Arc::clone(&self.is_running);
+        let is_active = Arc::clone(&self.is_active);
         is_running.store(true, Ordering::Relaxed);
 
         std::thread::spawn(move || unsafe {
@@ -318,6 +330,11 @@ impl WasapiLoopbackCapture {
             let mut sample_buf = Vec::<f32>::with_capacity(2048);
 
             while is_running.load(Ordering::Relaxed) {
+                if !is_active.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(150));
+                    continue;
+                }
+
                 let mut p_data = std::ptr::null_mut();
                 let mut num_frames = 0u32;
                 let mut flags = 0u32;

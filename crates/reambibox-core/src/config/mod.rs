@@ -4,9 +4,13 @@ use crate::color::zone::Zone;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(skip, default = "default_version_counter")]
+    pub version_counter: Arc<AtomicU64>,
     pub selected_monitor: usize,
     pub serial_port: String,
     pub baud_rate: u32,
@@ -127,11 +131,42 @@ fn default_wled_protocol() -> String {
     "ddp".to_string()
 }
 
+fn default_version_counter() -> Arc<AtomicU64> {
+    Arc::new(AtomicU64::new(1))
+}
+
+impl PartialEq for AppConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.selected_monitor == other.selected_monitor
+            && self.serial_port == other.serial_port
+            && self.baud_rate == other.baud_rate
+            && self.led_count == other.led_count
+            && self.brightness == other.brightness
+            && self.smoothing == other.smoothing
+            && self.gamma == other.gamma
+            && self.letterbox_detection == other.letterbox_detection
+            && self.target_fps == other.target_fps
+            && self.is_active == other.is_active
+            && self.mode == other.mode
+            && self.color_order == other.color_order
+            && self.static_color == other.static_color
+            && self.audio_effect == other.audio_effect
+            && self.audio_sensitivity == other.audio_sensitivity
+            && self.output_type == other.output_type
+            && self.wled_host == other.wled_host
+            && self.wled_port == other.wled_port
+            && self.wled_protocol == other.wled_protocol
+            && self.hotkeys == other.hotkeys
+            && self.zones == other.zones
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         let led_count = 60;
         let zones = wizard::ZoneWizard::generate_perimeter(20, 20, 10, 10);
         Self {
+            version_counter: default_version_counter(),
             selected_monitor: 0,
             serial_port: "COM10".to_string(),
             baud_rate: 115200,
@@ -180,7 +215,16 @@ impl AppConfig {
         default
     }
 
+    pub fn version(&self) -> u64 {
+        self.version_counter.load(Ordering::Acquire)
+    }
+
+    pub fn bump_version(&self) {
+        self.version_counter.fetch_add(1, Ordering::Release);
+    }
+
     pub fn save(&self) -> Result<(), std::io::Error> {
+        self.bump_version();
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;

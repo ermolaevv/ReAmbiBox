@@ -1,3 +1,4 @@
+use super::lut::GammaLut;
 use crate::device::types::RgbColor;
 
 /// Экспоненциальный фильтр временного сглаживания (Temporal Smoothing)
@@ -47,6 +48,48 @@ impl TemporalSmoother {
         result
     }
 
+    /// Высокопроизводительное сглаживание цветов по месту с одновременным применением Gamma LUT
+    /// Не производит аллокаций памяти при неизменном размере вектора out
+    pub fn smooth_into(
+        &mut self,
+        targets: &[RgbColor],
+        factor: f32,
+        lut: &GammaLut,
+        out: &mut Vec<RgbColor>,
+    ) {
+        let factor = factor.clamp(0.0, 0.99);
+        out.clear();
+        out.reserve(targets.len());
+
+        if self.current_colors.len() != targets.len() {
+            self.current_colors = targets
+                .iter()
+                .map(|c| [c.r as f32, c.g as f32, c.b as f32])
+                .collect();
+            for t in targets {
+                out.push(lut.correct_color(*t));
+            }
+            return;
+        }
+
+        for (curr, target) in self.current_colors.iter_mut().zip(targets.iter()) {
+            let tr = target.r as f32;
+            let tg = target.g as f32;
+            let tb = target.b as f32;
+
+            curr[0] = curr[0] * factor + tr * (1.0 - factor);
+            curr[1] = curr[1] * factor + tg * (1.0 - factor);
+            curr[2] = curr[2] * factor + tb * (1.0 - factor);
+
+            let raw = RgbColor::new(
+                curr[0].round() as u8,
+                curr[1].round() as u8,
+                curr[2].round() as u8,
+            );
+            out.push(lut.correct_color(raw));
+        }
+    }
+
     pub fn reset(&mut self) {
         self.current_colors.clear();
     }
@@ -75,6 +118,21 @@ mod tests {
         let out3 = smoother.smooth(&white, 0.5);
         // curr = 127.5 * 0.5 + 255 * 0.5 = 63.75 + 127.5 = 191.25 -> 191
         assert_eq!(out3[0], RgbColor::new(191, 191, 191));
+    }
+
+    #[test]
+    fn test_temporal_smoothing_smooth_into() {
+        let mut smoother = TemporalSmoother::new();
+        let lut = GammaLut::new(1.0, 1.0);
+        let mut out = Vec::new();
+
+        let black = vec![RgbColor::BLACK];
+        smoother.smooth_into(&black, 0.5, &lut, &mut out);
+        assert_eq!(out[0], RgbColor::BLACK);
+
+        let white = vec![RgbColor::WHITE];
+        smoother.smooth_into(&white, 0.5, &lut, &mut out);
+        assert_eq!(out[0], RgbColor::new(128, 128, 128));
     }
 }
 
