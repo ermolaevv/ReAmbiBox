@@ -236,19 +236,31 @@
           </div>
           <div class="setting-row">
             <label>Вкл / Выкл подсветку:</label>
-            <input type="text" id="hk-toggle-power" class="input-field hotkey-input" value="Ctrl+Shift+A" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+            <div class="hotkey-control-wrap">
+              <input type="text" id="hk-toggle-power" class="input-field hotkey-input" value="Ctrl+Shift+A" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <button type="button" class="btn-clear-hotkey" data-target="hk-toggle-power" title="Отключить эту клавишу">&times;</button>
+            </div>
           </div>
           <div class="setting-row">
             <label>Увеличить яркость (+10%):</label>
-            <input type="text" id="hk-brightness-up" class="input-field hotkey-input" value="Ctrl+Shift+Up" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+            <div class="hotkey-control-wrap">
+              <input type="text" id="hk-brightness-up" class="input-field hotkey-input" value="Ctrl+Shift+Up" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <button type="button" class="btn-clear-hotkey" data-target="hk-brightness-up" title="Отключить эту клавишу">&times;</button>
+            </div>
           </div>
           <div class="setting-row">
             <label>Уменьшить яркость (-10%):</label>
-            <input type="text" id="hk-brightness-down" class="input-field hotkey-input" value="Ctrl+Shift+Down" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+            <div class="hotkey-control-wrap">
+              <input type="text" id="hk-brightness-down" class="input-field hotkey-input" value="Ctrl+Shift+Down" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <button type="button" class="btn-clear-hotkey" data-target="hk-brightness-down" title="Отключить эту клавишу">&times;</button>
+            </div>
           </div>
           <div class="setting-row">
             <label>Оверлей зон на экране:</label>
-            <input type="text" id="hk-toggle-overlay" class="input-field hotkey-input" value="Ctrl+Shift+O" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+            <div class="hotkey-control-wrap">
+              <input type="text" id="hk-toggle-overlay" class="input-field hotkey-input" value="Ctrl+Shift+O" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <button type="button" class="btn-clear-hotkey" data-target="hk-toggle-overlay" title="Отключить эту клавишу">&times;</button>
+            </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
             <button id="btn-reset-hotkeys" class="btn btn-secondary">Сброс по умолчанию</button>

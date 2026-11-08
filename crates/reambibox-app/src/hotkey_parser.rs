@@ -6,8 +6,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 
 /// Парсит строку горячей клавиши (например, "Ctrl+Shift+A", "Alt+F12", "Ctrl+Up")
 /// в модификаторы Windows (HOT_KEY_MODIFIERS) и код виртуальной клавиши (VK).
+/// Если строка пустая, "Отключено", "None", "Disabled", возвращает `None`.
 pub fn parse_hotkey(s: &str) -> Option<(HOT_KEY_MODIFIERS, u32)> {
-    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+    let trimmed = s.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("disabled")
+        || trimmed.eq_ignore_ascii_case("off")
+        || trimmed == "Отключено"
+        || trimmed == "отключено"
+    {
+        return None;
+    }
+
+    let parts: Vec<&str> = trimmed.split('+').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
     if parts.is_empty() {
         return None;
     }
@@ -92,8 +104,14 @@ mod tests {
     #[test]
     fn test_parse_hotkey_invalid() {
         assert!(parse_hotkey("").is_none());
+        assert!(parse_hotkey("   ").is_none());
+        assert!(parse_hotkey("Отключено").is_none());
+        assert!(parse_hotkey("отключено").is_none());
+        assert!(parse_hotkey("None").is_none());
+        assert!(parse_hotkey("disabled").is_none());
         assert!(parse_hotkey("Ctrl+Shift").is_none());
         assert!(parse_hotkey("UnknownKey").is_none());
         assert!(parse_hotkey("Ctrl+A+B").is_none());
     }
 }
+

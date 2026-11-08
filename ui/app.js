@@ -379,10 +379,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const ovl = document.getElementById('hk-toggle-overlay');
 
           if (tog) tog.checked = data.hotkeys.enabled;
-          if (pwr) pwr.value = data.hotkeys.toggle_power;
-          if (up) up.value = data.hotkeys.brightness_up;
-          if (down) down.value = data.hotkeys.brightness_down;
-          if (ovl) ovl.value = data.hotkeys.toggle_overlay;
+          setHotkeyDisplay(pwr, data.hotkeys.toggle_power);
+          setHotkeyDisplay(up, data.hotkeys.brightness_up);
+          setHotkeyDisplay(down, data.hotkeys.brightness_down);
+          setHotkeyDisplay(ovl, data.hotkeys.toggle_overlay);
         }
 
         setMode(data.mode || 'screen');
@@ -393,22 +393,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Вспомогательная функция установки отображения хоткея
+  function setHotkeyDisplay(input, val) {
+    if (!input) return;
+    const str = (val || '').trim();
+    if (!str || str.toLowerCase() === 'none' || str.toLowerCase() === 'disabled' || str === 'Отключено' || str === 'отключено') {
+      input.value = 'Отключено';
+      input.classList.add('disabled');
+    } else {
+      input.value = str;
+      input.classList.remove('disabled');
+    }
+  }
+
   // Интерактивная запись горячих клавиш
   document.querySelectorAll('.hotkey-input').forEach(input => {
     input.addEventListener('focus', () => {
       input.dataset.oldVal = input.value;
       input.value = 'Нажмите клавиши...';
+      input.classList.remove('disabled');
     });
 
     input.addEventListener('blur', () => {
       if (input.value === 'Нажмите клавиши...') {
-        input.value = input.dataset.oldVal || 'Ctrl+Shift+A';
+        setHotkeyDisplay(input, input.dataset.oldVal || 'Отключено');
       }
     });
 
     input.addEventListener('keydown', (e) => {
       e.preventDefault();
       e.stopPropagation();
+
+      // Очистка / отключение клавишами Backspace или Delete
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        setHotkeyDisplay(input, '');
+        input.blur();
+        return;
+      }
 
       if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
 
@@ -433,20 +454,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
       parts.push(key);
       input.value = parts.join('+');
+      input.classList.remove('disabled');
       input.blur();
+    });
+  });
+
+  // Кнопки очистки / отключения («✕»)
+  document.querySelectorAll('.btn-clear-hotkey').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = btn.dataset.target;
+      const targetInput = document.getElementById(targetId);
+      if (targetInput) {
+        setHotkeyDisplay(targetInput, '');
+      }
     });
   });
 
   const btnSaveHotkeys = document.getElementById('btn-save-hotkeys');
   const btnResetHotkeys = document.getElementById('btn-reset-hotkeys');
 
+  function getHotkeyPayloadValue(id) {
+    const val = document.getElementById(id)?.value?.trim() || '';
+    if (!val || val === 'Отключено' || val === 'Нажмите клавиши...') {
+      return '';
+    }
+    return val;
+  }
+
   btnSaveHotkeys?.addEventListener('click', () => {
     const hotkeys = {
       enabled: document.getElementById('toggle-hotkeys-enabled')?.checked ?? true,
-      toggle_power: document.getElementById('hk-toggle-power')?.value || 'Ctrl+Shift+A',
-      brightness_up: document.getElementById('hk-brightness-up')?.value || 'Ctrl+Shift+Up',
-      brightness_down: document.getElementById('hk-brightness-down')?.value || 'Ctrl+Shift+Down',
-      toggle_overlay: document.getElementById('hk-toggle-overlay')?.value || 'Ctrl+Shift+O',
+      toggle_power: getHotkeyPayloadValue('hk-toggle-power'),
+      brightness_up: getHotkeyPayloadValue('hk-brightness-up'),
+      brightness_down: getHotkeyPayloadValue('hk-brightness-down'),
+      toggle_overlay: getHotkeyPayloadValue('hk-toggle-overlay'),
     };
     queueConfigUpdate({ hotkeys });
     btnSaveHotkeys.textContent = 'Сохранено!';
@@ -463,10 +505,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const ovl = document.getElementById('hk-toggle-overlay');
 
     if (tog) tog.checked = true;
-    if (pwr) pwr.value = 'Ctrl+Shift+A';
-    if (up) up.value = 'Ctrl+Shift+Up';
-    if (down) down.value = 'Ctrl+Shift+Down';
-    if (ovl) ovl.value = 'Ctrl+Shift+O';
+    setHotkeyDisplay(pwr, 'Ctrl+Shift+A');
+    setHotkeyDisplay(up, 'Ctrl+Shift+Up');
+    setHotkeyDisplay(down, 'Ctrl+Shift+Down');
+    setHotkeyDisplay(ovl, 'Ctrl+Shift+O');
 
     const hotkeys = {
       enabled: true,

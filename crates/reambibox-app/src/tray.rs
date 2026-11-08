@@ -338,6 +338,20 @@ unsafe extern "system" fn tray_wnd_proc(
     }
 }
 
+fn format_hotkey_label(s: &str) -> &str {
+    let trimmed = s.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("disabled")
+        || trimmed == "Отключено"
+        || trimmed == "отключено"
+    {
+        "Отключено"
+    } else {
+        trimmed
+    }
+}
+
 unsafe fn register_configured_hotkeys(hwnd: HWND, cfg: &reambibox_core::config::HotkeysConfig) {
     let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER);
     let _ = UnregisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP);
@@ -363,8 +377,11 @@ unsafe fn register_configured_hotkeys(hwnd: HWND, cfg: &reambibox_core::config::
     }
 
     println!(
-        "[Hotkeys] Активны комбинации: Питание ({}), Яркость +10% ({}), Яркость -10% ({}), Оверлей ({})",
-        cfg.toggle_power, cfg.brightness_up, cfg.brightness_down, cfg.toggle_overlay
+        "[Hotkeys] Комбинации: Питание ({}), Яркость +10% ({}), Яркость -10% ({}), Оверлей ({})",
+        format_hotkey_label(&cfg.toggle_power),
+        format_hotkey_label(&cfg.brightness_up),
+        format_hotkey_label(&cfg.brightness_down),
+        format_hotkey_label(&cfg.toggle_overlay)
     );
 }
 
