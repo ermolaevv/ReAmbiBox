@@ -24,7 +24,55 @@ pub struct AppConfig {
     pub color_order: String,
     #[serde(default = "default_static_color")]
     pub static_color: [u8; 3],
+    #[serde(default)]
+    pub hotkeys: HotkeysConfig,
     pub zones: Vec<Zone>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HotkeysConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_toggle_power")]
+    pub toggle_power: String,
+    #[serde(default = "default_brightness_up")]
+    pub brightness_up: String,
+    #[serde(default = "default_brightness_down")]
+    pub brightness_down: String,
+    #[serde(default = "default_toggle_overlay")]
+    pub toggle_overlay: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_toggle_power() -> String {
+    "Ctrl+Shift+A".to_string()
+}
+
+fn default_brightness_up() -> String {
+    "Ctrl+Shift+Up".to_string()
+}
+
+fn default_brightness_down() -> String {
+    "Ctrl+Shift+Down".to_string()
+}
+
+fn default_toggle_overlay() -> String {
+    "Ctrl+Shift+O".to_string()
+}
+
+impl Default for HotkeysConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            toggle_power: default_toggle_power(),
+            brightness_up: default_brightness_up(),
+            brightness_down: default_brightness_down(),
+            toggle_overlay: default_toggle_overlay(),
+        }
+    }
 }
 
 fn default_is_active() -> bool {
@@ -61,6 +109,7 @@ impl Default for AppConfig {
             mode: default_mode(),
             color_order: default_color_order(),
             static_color: default_static_color(),
+            hotkeys: HotkeysConfig::default(),
             zones,
         }
     }

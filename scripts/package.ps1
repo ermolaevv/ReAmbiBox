@@ -47,32 +47,33 @@ Copy-Item -Force $ExeSource (Join-Path $PortableDir "reambibox-app.exe")
 Copy-Item -Force (Join-Path $RepoRoot "crates\reambibox-app\resources\app.ico") (Join-Path $PortableDir "app.ico")
 
 # Создаем краткое руководство README.txt
-$ReadmeContent = @"
-============================================================
-   ReAmbiBox v$Version — High-Performance Ambilight Service
-============================================================
-
-БЫСТРЫЙ СТАРТ:
-1. Запустите 'reambibox-app.exe'.
-   Программа свернется в системный трей (значок возле часов).
-2. Откройте панель управления в любом браузере:
-   http://localhost:3637
-
-ГЛОБАЛЬНЫЕ ГОРЯЧИЕ КЛАВИШИ WINDOWS:
-- Ctrl + Shift + A        — Включение / выключение подсветки
-- Ctrl + Shift + Вверх    — Увеличение яркости (+10%)
-- Ctrl + Shift + Вниз     — Уменьшение яркости (-10%)
-- Ctrl + Shift + O        — Экранный оверлей зон калибровки
-- Esc                     — Сохранить и закрыть оверлей
-
-ПАРАМЕТРЫ ЗАПУСКА:
-- reambibox-app.exe --minimized   — тихий запуск в трей без открытия окон
-
-УНИКАЛЬНОСТЬ ПРОЦЕССА:
-Новый запуск reambibox-app.exe автоматически завершает и замещает старый
-экземпляр, освобождая COM-порт без конфликтов.
-"@
-Set-Content -Path (Join-Path $PortableDir "README.txt") -Value $ReadmeContent -Encoding UTF8
+$ReadmeLines = @(
+    "============================================================",
+    "   ReAmbiBox v$Version - High-Performance Ambilight Service",
+    "============================================================",
+    "",
+    "БЫСТРЫЙ СТАРТ:",
+    "1. Запустите 'reambibox-app.exe'.",
+    "   Программа свернется в системный трей (значок возле часов).",
+    "2. Откройте панель управления в любом браузере: http://localhost:3637",
+    "",
+    "ГЛОБАЛЬНЫЕ ГОРЯЧИЕ КЛАВИШИ WINDOWS:",
+    "- Настраиваются в панели управления (Web UI)",
+    "- По умолчанию:",
+    "  * Ctrl + Shift + A        - Включение / выключение подсветки",
+    "  * Ctrl + Shift + Вверх    - Увеличение яркости (+10%)",
+    "  * Ctrl + Shift + Вниз     - Уменьшение яркости (-10%)",
+    "  * Ctrl + Shift + O        - Экранный оверлей зон калибровки",
+    "  * Esc                     - Сохранить и закрыть оверлей",
+    "",
+    "ПАРАМЕТРЫ ЗАПУСКА:",
+    "- reambibox-app.exe --minimized   - тихий запуск в трей без открытия окон",
+    "",
+    "УНИКАЛЬНОСТЬ ПРОЦЕССА:",
+    "Новый запуск reambibox-app.exe автоматически завершает и замещает старый",
+    "экземпляр, освобождая COM-порт без конфликтов."
+)
+$ReadmeLines | Out-File -FilePath (Join-Path $PortableDir "README.txt") -Encoding UTF8
 
 # 3. Создание ZIP-архива
 Write-Host "`n>>> [3/4] Создание архива ReAmbiBox-Portable-v$Version.zip..." -ForegroundColor Yellow

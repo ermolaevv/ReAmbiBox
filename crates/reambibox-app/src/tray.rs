@@ -11,9 +11,7 @@ use windows::Win32::System::Power::{
 use windows::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_CONTROL, MOD_SHIFT, VK_DOWN, VK_UP,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows::Win32::UI::Shell::{
     ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
     NOTIFYICONDATAW,
@@ -30,6 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 // Константы оконных сообщений и идентификаторов меню
 const WM_TRAYICON: u32 = WM_USER + 101;
+const WM_RELOAD_HOTKEYS: u32 = WM_USER + 102;
 const ID_MENU_TOGGLE: usize = 2001;
 const ID_MENU_OVERLAY: usize = 2005;
 const ID_MENU_WEBUI: usize = 2002;
@@ -66,18 +65,36 @@ static GLOBAL_TRAY_CTX: parking_lot::Mutex<Option<TrayContext>> = parking_lot::M
 pub struct TrayManager {
     is_display_on: Arc<AtomicBool>,
     is_session_unlocked: Arc<AtomicBool>,
+    hwnd: parking_lot::Mutex<Option<HWND>>,
 }
+
+unsafe impl Send for TrayManager {}
+unsafe impl Sync for TrayManager {}
 
 impl TrayManager {
     pub fn new() -> Self {
         Self {
             is_display_on: Arc::new(AtomicBool::new(true)),
             is_session_unlocked: Arc::new(AtomicBool::new(true)),
+            hwnd: parking_lot::Mutex::new(None),
         }
     }
 
     pub fn is_display_active(&self) -> bool {
         self.is_display_on.load(Ordering::Relaxed) && self.is_session_unlocked.load(Ordering::Relaxed)
+    }
+
+    pub fn reload_hotkeys(&self) {
+        if let Some(hwnd) = *self.hwnd.lock() {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    hwnd,
+                    WM_RELOAD_HOTKEYS,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
     }
 
     pub fn run_tray_thread(
@@ -88,6 +105,7 @@ impl TrayManager {
     ) {
         let display_on_ref = Arc::clone(&self.is_display_on);
         let session_unlocked_ref = Arc::clone(&self.is_session_unlocked);
+        let (tx_hwnd, rx_hwnd) = std::sync::mpsc::channel::<usize>();
 
         std::thread::spawn(move || unsafe {
             let instance = GetModuleHandleW(None).unwrap_or_default();
@@ -122,6 +140,8 @@ impl TrayManager {
                 return;
             }
 
+            let _ = tx_hwnd.send(hwnd.0 as usize);
+
             // Добавляем иконку в системный трей (используем встроенную иконку ReAmbiBox, либо системную как fallback)
             let icon: HICON = LoadIconW(HINSTANCE(instance.0), PCWSTR(1 as _))
                 .or_else(|_| LoadIconW(None, IDI_APPLICATION))
@@ -152,13 +172,9 @@ impl TrayManager {
             // Регистрация на события блокировки сессии (Win + L)
             let _ = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
 
-            // Регистрация глобальных горячих клавиш Windows (Ctrl+Shift+A, Ctrl+Shift+Up/Down, Ctrl+Shift+O)
-            let mods = HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_SHIFT.0);
-            let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER, mods, b'A' as u32);
-            let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP, mods, VK_UP.0 as u32);
-            let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_DOWN, mods, VK_DOWN.0 as u32);
-            let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_OVERLAY, mods, b'O' as u32);
-            println!("[Hotkeys] Глобальные горячие клавиши активны: Ctrl+Shift+A (Вкл/Выкл), Ctrl+Shift+Up/Down (Яркость), Ctrl+Shift+O (Оверлей)");
+            // Регистрация глобальных горячих клавиш Windows из конфигурации
+            let hotkeys_cfg = config.read().hotkeys.clone();
+            register_configured_hotkeys(hwnd, &hotkeys_cfg);
 
             *GLOBAL_TRAY_CTX.lock() = Some(TrayContext {
                 config,
@@ -191,6 +207,10 @@ impl TrayManager {
             }
             is_running.store(false, Ordering::Relaxed);
         });
+
+        if let Ok(raw_hwnd) = rx_hwnd.recv() {
+            *self.hwnd.lock() = Some(HWND(raw_hwnd as *mut _));
+        }
     }
 }
 
@@ -262,28 +282,36 @@ unsafe extern "system" fn tray_wnd_proc(
                         cfg.is_active = !cfg.is_active;
                         let active = cfg.is_active;
                         let _ = cfg.save();
-                        println!("[Hotkey] Питание подсветки (Ctrl+Shift+A): {}", if active { "ВКЛ" } else { "ВЫКЛ" });
+                        println!("[Hotkey] Питание подсветки: {}", if active { "ВКЛ" } else { "ВЫКЛ" });
                     }
                     HOTKEY_ID_BRIGHTNESS_UP => {
                         let mut cfg = ctx.config.write();
                         cfg.brightness = (cfg.brightness + 0.1).clamp(0.0, 1.0);
                         let b = cfg.brightness;
                         let _ = cfg.save();
-                        println!("[Hotkey] Яркость увеличена (Ctrl+Shift+Up): {:.0}%", b * 100.0);
+                        println!("[Hotkey] Яркость увеличена: {:.0}%", b * 100.0);
                     }
                     HOTKEY_ID_BRIGHTNESS_DOWN => {
                         let mut cfg = ctx.config.write();
                         cfg.brightness = (cfg.brightness - 0.1).clamp(0.0, 1.0);
                         let b = cfg.brightness;
                         let _ = cfg.save();
-                        println!("[Hotkey] Яркость уменьшена (Ctrl+Shift+Down): {:.0}%", b * 100.0);
+                        println!("[Hotkey] Яркость уменьшена: {:.0}%", b * 100.0);
                     }
                     HOTKEY_ID_TOGGLE_OVERLAY => {
                         ctx.overlay_manager.toggle();
-                        println!("[Hotkey] Переключение экранного оверлея зон (Ctrl+Shift+O)");
+                        println!("[Hotkey] Переключение экранного оверлея зон");
                     }
                     _ => {}
                 }
+            }
+            LRESULT(0)
+        }
+
+        WM_RELOAD_HOTKEYS => {
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                let hotkeys_cfg = ctx.config.read().hotkeys.clone();
+                register_configured_hotkeys(hwnd, &hotkeys_cfg);
             }
             LRESULT(0)
         }
@@ -308,6 +336,36 @@ unsafe extern "system" fn tray_wnd_proc(
 
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+unsafe fn register_configured_hotkeys(hwnd: HWND, cfg: &reambibox_core::config::HotkeysConfig) {
+    let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER);
+    let _ = UnregisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP);
+    let _ = UnregisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_DOWN);
+    let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE_OVERLAY);
+
+    if !cfg.enabled {
+        println!("[Hotkeys] Глобальные горячие клавиши отключены в настройках.");
+        return;
+    }
+
+    if let Some((mods, vk)) = crate::hotkey_parser::parse_hotkey(&cfg.toggle_power) {
+        let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_POWER, mods, vk);
+    }
+    if let Some((mods, vk)) = crate::hotkey_parser::parse_hotkey(&cfg.brightness_up) {
+        let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_UP, mods, vk);
+    }
+    if let Some((mods, vk)) = crate::hotkey_parser::parse_hotkey(&cfg.brightness_down) {
+        let _ = RegisterHotKey(hwnd, HOTKEY_ID_BRIGHTNESS_DOWN, mods, vk);
+    }
+    if let Some((mods, vk)) = crate::hotkey_parser::parse_hotkey(&cfg.toggle_overlay) {
+        let _ = RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE_OVERLAY, mods, vk);
+    }
+
+    println!(
+        "[Hotkeys] Активны комбинации: Питание ({}), Яркость +10% ({}), Яркость -10% ({}), Оверлей ({})",
+        cfg.toggle_power, cfg.brightness_up, cfg.brightness_down, cfg.toggle_overlay
+    );
 }
 
 unsafe fn open_web_ui() {

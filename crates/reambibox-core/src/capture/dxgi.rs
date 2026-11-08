@@ -353,8 +353,8 @@ mod tests {
         println!("\n=== ОБНАРУЖЕННЫЕ МОНИТОРЫ (всего: {}) ===", monitors.len());
         for m in &monitors {
             println!(
-                "  [{}] {} | {} | {}x{} | Primary: {}",
-                m.index, m.adapter_name, m.output_name, m.width, m.height, m.is_primary
+                "  [{}] {} | {} | pos: ({}, {}) | {}x{} | Primary: {}",
+                m.index, m.adapter_name, m.output_name, m.x, m.y, m.width, m.height, m.is_primary
             );
         }
     }

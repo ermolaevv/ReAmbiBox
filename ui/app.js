@@ -370,6 +370,21 @@ document.addEventListener('DOMContentLoaded', () => {
           selectColorOrder.value = data.color_order;
         }
 
+        // Заполняем горячие клавиши
+        if (data.hotkeys) {
+          const tog = document.getElementById('toggle-hotkeys-enabled');
+          const pwr = document.getElementById('hk-toggle-power');
+          const up = document.getElementById('hk-brightness-up');
+          const down = document.getElementById('hk-brightness-down');
+          const ovl = document.getElementById('hk-toggle-overlay');
+
+          if (tog) tog.checked = data.hotkeys.enabled;
+          if (pwr) pwr.value = data.hotkeys.toggle_power;
+          if (up) up.value = data.hotkeys.brightness_up;
+          if (down) down.value = data.hotkeys.brightness_down;
+          if (ovl) ovl.value = data.hotkeys.toggle_overlay;
+        }
+
         setMode(data.mode || 'screen');
         renderZones(data.zones);
       }
@@ -377,6 +392,95 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('Сервер ReAmbiBox недоступен:', e);
     }
   }
+
+  // Интерактивная запись горячих клавиш
+  document.querySelectorAll('.hotkey-input').forEach(input => {
+    input.addEventListener('focus', () => {
+      input.dataset.oldVal = input.value;
+      input.value = 'Нажмите клавиши...';
+    });
+
+    input.addEventListener('blur', () => {
+      if (input.value === 'Нажмите клавиши...') {
+        input.value = input.dataset.oldVal || 'Ctrl+Shift+A';
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (e.metaKey) parts.push('Win');
+
+      let key = e.key;
+      if (key === 'ArrowUp') key = 'Up';
+      else if (key === 'ArrowDown') key = 'Down';
+      else if (key === 'ArrowLeft') key = 'Left';
+      else if (key === 'ArrowRight') key = 'Right';
+      else if (key === ' ') key = 'Space';
+      else if (key.length === 1) key = key.toUpperCase();
+
+      // Если нет модификаторов, разрешаем только клавиши F1-F12
+      if (parts.length === 0 && !key.startsWith('F')) {
+        return;
+      }
+
+      parts.push(key);
+      input.value = parts.join('+');
+      input.blur();
+    });
+  });
+
+  const btnSaveHotkeys = document.getElementById('btn-save-hotkeys');
+  const btnResetHotkeys = document.getElementById('btn-reset-hotkeys');
+
+  btnSaveHotkeys?.addEventListener('click', () => {
+    const hotkeys = {
+      enabled: document.getElementById('toggle-hotkeys-enabled')?.checked ?? true,
+      toggle_power: document.getElementById('hk-toggle-power')?.value || 'Ctrl+Shift+A',
+      brightness_up: document.getElementById('hk-brightness-up')?.value || 'Ctrl+Shift+Up',
+      brightness_down: document.getElementById('hk-brightness-down')?.value || 'Ctrl+Shift+Down',
+      toggle_overlay: document.getElementById('hk-toggle-overlay')?.value || 'Ctrl+Shift+O',
+    };
+    queueConfigUpdate({ hotkeys });
+    btnSaveHotkeys.textContent = 'Сохранено!';
+    setTimeout(() => {
+      btnSaveHotkeys.textContent = 'Сохранить хоткеи';
+    }, 1200);
+  });
+
+  btnResetHotkeys?.addEventListener('click', () => {
+    const tog = document.getElementById('toggle-hotkeys-enabled');
+    const pwr = document.getElementById('hk-toggle-power');
+    const up = document.getElementById('hk-brightness-up');
+    const down = document.getElementById('hk-brightness-down');
+    const ovl = document.getElementById('hk-toggle-overlay');
+
+    if (tog) tog.checked = true;
+    if (pwr) pwr.value = 'Ctrl+Shift+A';
+    if (up) up.value = 'Ctrl+Shift+Up';
+    if (down) down.value = 'Ctrl+Shift+Down';
+    if (ovl) ovl.value = 'Ctrl+Shift+O';
+
+    const hotkeys = {
+      enabled: true,
+      toggle_power: 'Ctrl+Shift+A',
+      brightness_up: 'Ctrl+Shift+Up',
+      brightness_down: 'Ctrl+Shift+Down',
+      toggle_overlay: 'Ctrl+Shift+O',
+    };
+    queueConfigUpdate({ hotkeys });
+    btnResetHotkeys.textContent = 'Сброшено!';
+    setTimeout(() => {
+      btnResetHotkeys.textContent = 'Сброс по умолчанию';
+    }, 1200);
+  });
 
   fetchStatus();
   setInterval(fetchStatus, 1000);

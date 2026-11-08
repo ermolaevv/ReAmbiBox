@@ -3,27 +3,31 @@ use reambibox_core::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use windows::core::w;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
     CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
-    InvalidateRect, Rectangle, ScreenToClient, SelectObject, SetBkMode, SetTextColor,
+    InvalidateRect, Rectangle, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
     DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
-    PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT,
+    HBITMAP, HDC, HGDIOBJ, HRGN, PAINTSTRUCT, PS_SOLID, RDW_ERASE, RDW_INVALIDATE, RDW_UPDATENOW,
+    SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
-    LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor, SetLayeredWindowAttributes,
-    SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HTCLIENT, HWND_TOPMOST, IDC_ARROW,
-    IDC_SIZEALL, IDC_SIZENWSE, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
+    GetSystemMetrics, LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor,
+    SetLayeredWindowAttributes, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HTCLIENT,
+    HWND_TOPMOST, IDC_ARROW, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
     SW_HIDE, SW_SHOW, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
     WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WM_TOGGLE_OVERLAY: u32 = WM_USER + 201;
+// Ключевой цвет прозрачности DWM — чистый Magenta RGB(255, 0, 255)
+// Устраняет артефакты, шлейфы и ложные прозрачные дыры от теней текста
+const OVERLAY_COLOR_KEY: COLORREF = COLORREF(0x00FF00FF);
 
 struct OverlayState {
     config: Arc<RwLock<AppConfig>>,
@@ -37,6 +41,11 @@ struct OverlayState {
     hwnd: HWND,
     screen_width: i32,
     screen_height: i32,
+    mem_dc: Option<HDC>,
+    mem_bmp: Option<HBITMAP>,
+    old_bmp: Option<HGDIOBJ>,
+    buf_w: i32,
+    buf_h: i32,
 }
 
 unsafe impl Send for OverlayState {}
@@ -91,6 +100,11 @@ impl ZoneOverlayManager {
         let (tx, rx) = std::sync::mpsc::channel::<Option<usize>>();
 
         std::thread::spawn(move || unsafe {
+            // Включаем Per-Monitor DPI Awareness v2 для потока оверлея
+            let _ = windows::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
+                windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            );
+
             let instance = GetModuleHandleW(None).unwrap_or_default();
             let class_name = w!("ReAmbiBoxZoneOverlayClass");
 
@@ -130,13 +144,12 @@ impl ZoneOverlayManager {
                 return;
             }
 
-            // Устанавливаем ключевой цвет прозрачности (черный RGB(0,0,0) полностью прозрачен)
-            // И глобальную прозрачность альфа 235 (для видимости зон поверх окон)
+            // Устанавливаем ключевой цвет прозрачности Magenta без конфликтов DWM-альфы
             let _ = SetLayeredWindowAttributes(
                 hwnd,
-                COLORREF(0x00000000), // Черный цвет = прозрачный фон
-                235,
-                LWA_COLORKEY | LWA_ALPHA,
+                OVERLAY_COLOR_KEY,
+                0,
+                LWA_COLORKEY,
             );
 
             *GLOBAL_OVERLAY.lock() = Some(OverlayState {
@@ -150,6 +163,11 @@ impl ZoneOverlayManager {
                 hwnd,
                 screen_width: screen_w,
                 screen_height: screen_h,
+                mem_dc: None,
+                mem_bmp: None,
+                old_bmp: None,
+                buf_w: 0,
+                buf_h: 0,
             });
 
             let _ = tx.send(Some(hwnd.0 as usize));
@@ -222,7 +240,12 @@ unsafe extern "system" fn overlay_wnd_proc(
         }
 
         WM_ERASEBKGND => {
-            // При двойной буферизации фон очищается в памяти, предотвращая мерцание
+            let hdc = HDC(wparam.0 as *mut _);
+            let mut rc = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rc);
+            let bg_brush = CreateSolidBrush(OVERLAY_COLOR_KEY);
+            FillRect(hdc, &rc, bg_brush);
+            let _ = DeleteObject(bg_brush);
             LRESULT(1)
         }
 
@@ -230,7 +253,7 @@ unsafe extern "system" fn overlay_wnd_proc(
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
 
-            if let Some(ref state) = *GLOBAL_OVERLAY.lock() {
+            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
                 let screen_w = state.screen_width;
                 let screen_h = state.screen_height;
                 let (zones, sw_f32, sh_f32) = {
@@ -238,142 +261,148 @@ unsafe extern "system" fn overlay_wnd_proc(
                     (cfg.zones.clone(), screen_w as f32, screen_h as f32)
                 };
 
-                // Двойная буферизация в памяти для исключения шлейфов и мерцания
-                let mem_dc = CreateCompatibleDC(hdc);
-                let mem_bmp = CreateCompatibleBitmap(hdc, screen_w, screen_h);
-                let old_bmp = SelectObject(mem_dc, mem_bmp);
+                // Выделяем или переиспользуем буфер двойной буферизации
+                if state.mem_dc.is_none() || state.buf_w != screen_w || state.buf_h != screen_h {
+                    if let Some(old_dc) = state.mem_dc {
+                        if let Some(old_b) = state.old_bmp {
+                            SelectObject(old_dc, old_b);
+                        }
+                        if let Some(bmp) = state.mem_bmp {
+                            let _ = DeleteObject(bmp);
+                        }
+                        let _ = DeleteDC(old_dc);
+                    }
 
-                // Очищаем весь буфер цветом прозрачности RGB(0,0,0)
-                let rc_full = RECT {
-                    left: 0,
-                    top: 0,
-                    right: screen_w,
-                    bottom: screen_h,
-                };
-                let bg_brush = CreateSolidBrush(COLORREF(0x00000000));
-                FillRect(mem_dc, &rc_full, bg_brush);
-                let _ = DeleteObject(bg_brush);
+                    let new_dc = CreateCompatibleDC(hdc);
+                    let new_bmp = CreateCompatibleBitmap(hdc, screen_w, screen_h);
+                    let prev_bmp = SelectObject(new_dc, new_bmp);
 
-                // Создаем шрифты для отображения номеров зон и плашки
-                let h_font = CreateFontW(
-                    14, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, w!("Segoe UI"),
-                );
-                let old_font = SelectObject(mem_dc, h_font);
-                SetBkMode(mem_dc, TRANSPARENT);
-
-                // Отрисовка плашки подсказки вверху по центру
-                {
-                    let banner_w = 640;
-                    let banner_h = 36;
-                    let banner_x = (screen_w - banner_w) / 2;
-                    let banner_y = 16;
-                    let rc_banner = RECT {
-                        left: banner_x,
-                        top: banner_y,
-                        right: banner_x + banner_w,
-                        bottom: banner_y + banner_h,
-                    };
-                    let brush = CreateSolidBrush(COLORREF(0x00151210)); // Темно-серый
-                    FillRect(mem_dc, &rc_banner, brush);
-                    let _ = DeleteObject(brush);
-
-                    let pen = CreatePen(PS_SOLID, 1, COLORREF(0x00EB8030)); // Оранжевая рамка
-                    let old_pen = SelectObject(mem_dc, pen);
-                    let _ = Rectangle(mem_dc, banner_x, banner_y, banner_x + banner_w, banner_y + banner_h);
-                    SelectObject(mem_dc, old_pen);
-                    let _ = DeleteObject(pen);
-
-                    SetTextColor(mem_dc, COLORREF(0x00FFFFFF));
-                    let mut text: Vec<u16> = "ReAmbiBox — Настройка зон | Перетаскивайте мышкой | Esc: Сохранить и закрыть\0"
-                        .encode_utf16()
-                        .collect();
-                    let mut rc_text = rc_banner;
-                    DrawTextW(mem_dc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    state.mem_dc = Some(new_dc);
+                    state.mem_bmp = Some(new_bmp);
+                    state.old_bmp = Some(prev_bmp);
+                    state.buf_w = screen_w;
+                    state.buf_h = screen_h;
                 }
 
-                // Отрисовка всех зон экрана в буфер памяти
-                for zone in &zones {
-                    let is_active = state.active_zone_id == Some(zone.id);
-
-                    let zx = (zone.rect.x * sw_f32).round() as i32;
-                    let zy = (zone.rect.y * sh_f32).round() as i32;
-                    let zw = (zone.rect.width * sw_f32).round().max(16.0) as i32;
-                    let zh = (zone.rect.height * sh_f32).round().max(16.0) as i32;
-
-                    let rc_zone = RECT {
-                        left: zx,
-                        top: zy,
-                        right: zx + zw,
-                        bottom: zy + zh,
+                if let Some(mem_dc) = state.mem_dc {
+                    // 1. Очищаем весь буфер прозрачным ключевым цветом Magenta
+                    let rc_full = RECT {
+                        left: 0,
+                        top: 0,
+                        right: screen_w,
+                        bottom: screen_h,
                     };
+                    let bg_brush = CreateSolidBrush(OVERLAY_COLOR_KEY);
+                    FillRect(mem_dc, &rc_full, bg_brush);
+                    let _ = DeleteObject(bg_brush);
 
-                    // Полупрозрачный цвет заливки зоны (синий/пурпурный для обычных, неоновый циан для активной)
-                    let fill_color = if is_active {
-                        COLORREF(0x004A3B10) // Подсвеченный сине-зеленый
-                    } else {
-                        COLORREF(0x003A2018) // Полупрозрачный темно-синий
-                    };
-                    let brush = CreateSolidBrush(fill_color);
-                    FillRect(mem_dc, &rc_zone, brush);
-                    let _ = DeleteObject(brush);
+                    // 2. Создаем шрифты
+                    let h_font = CreateFontW(
+                        14, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, w!("Segoe UI"),
+                    );
+                    let old_font = SelectObject(mem_dc, h_font);
+                    SetBkMode(mem_dc, TRANSPARENT);
 
-                    // Рамка зоны (активная: толстая ярко-голубая, обычные: розовая/фиолетовая)
-                    let border_color = if is_active {
-                        COLORREF(0x00FFD700) // Яркий циан (BGR: 00FFD700)
-                    } else {
-                        COLORREF(0x00C832D0) // Фиолетово-розовая
-                    };
-                    let pen = CreatePen(PS_SOLID, if is_active { 2 } else { 1 }, border_color);
-                    let old_pen = SelectObject(mem_dc, pen);
+                    // 3. Плашка подсказки вверху экрана
+                    {
+                        let banner_w = 640;
+                        let banner_h = 36;
+                        let banner_x = (screen_w - banner_w) / 2;
+                        let banner_y = 16;
+                        let rc_banner = RECT {
+                            left: banner_x,
+                            top: banner_y,
+                            right: banner_x + banner_w,
+                            bottom: banner_y + banner_h,
+                        };
+                        let brush = CreateSolidBrush(COLORREF(0x00151210));
+                        FillRect(mem_dc, &rc_banner, brush);
+                        let _ = DeleteObject(brush);
 
-                    let old_brush = SelectObject(mem_dc, windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH));
-                    let _ = Rectangle(mem_dc, zx, zy, zx + zw, zy + zh);
-                    SelectObject(mem_dc, old_brush);
-                    SelectObject(mem_dc, old_pen);
-                    let _ = DeleteObject(pen);
+                        let pen = CreatePen(PS_SOLID, 1, COLORREF(0x00EB8030));
+                        let old_pen = SelectObject(mem_dc, pen);
+                        let _ = Rectangle(mem_dc, banner_x, banner_y, banner_x + banner_w, banner_y + banner_h);
+                        SelectObject(mem_dc, old_pen);
+                        let _ = DeleteObject(pen);
 
-                    // Маркер ресайза в правом нижнем углу
-                    if is_active {
-                        let handle_size = 6;
-                        let handle_brush = CreateSolidBrush(COLORREF(0x0000FFFF));
-                        let rc_handle = RECT {
-                            left: zx + zw - handle_size,
-                            top: zy + zh - handle_size,
+                        SetTextColor(mem_dc, COLORREF(0x00FFFFFF));
+                        let mut text: Vec<u16> = "ReAmbiBox — Настройка зон | Перетаскивайте мышкой | Esc: Сохранить и закрыть\0"
+                            .encode_utf16()
+                            .collect();
+                        let mut rc_text = rc_banner;
+                        DrawTextW(mem_dc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    }
+
+                    // 4. Отрисовка всех зон
+                    for zone in &zones {
+                        let is_active = state.active_zone_id == Some(zone.id);
+
+                        let zx = (zone.rect.x * sw_f32).round() as i32;
+                        let zy = (zone.rect.y * sh_f32).round() as i32;
+                        let zw = (zone.rect.width * sw_f32).round().max(16.0) as i32;
+                        let zh = (zone.rect.height * sh_f32).round().max(16.0) as i32;
+
+                        let rc_zone = RECT {
+                            left: zx,
+                            top: zy,
                             right: zx + zw,
                             bottom: zy + zh,
                         };
-                        FillRect(mem_dc, &rc_handle, handle_brush);
-                        let _ = DeleteObject(handle_brush);
-                    }
 
-                    // Номер зоны по центру с контрастной обводкой
-                    let mut num_text: Vec<u16> = format!("{}\0", zone.id + 1).encode_utf16().collect();
-                    SetTextColor(mem_dc, COLORREF(0x00000000)); // Черная тень/обводка
-                    for (dx, dy) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                        let mut rc_shadow = RECT {
-                            left: rc_zone.left + dx,
-                            top: rc_zone.top + dy,
-                            right: rc_zone.right + dx,
-                            bottom: rc_zone.bottom + dy,
+                        // Рамка зоны: активная — яркий циан (2px), обычные — фиолетовый (1px)
+                        let border_color = if is_active {
+                            COLORREF(0x00FFD700)
+                        } else {
+                            COLORREF(0x00C832D0)
                         };
-                        let mut num_text_shadow = num_text.clone();
-                        DrawTextW(mem_dc, &mut num_text_shadow, &mut rc_shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                        let pen = CreatePen(PS_SOLID, if is_active { 2 } else { 1 }, border_color);
+                        let old_pen = SelectObject(mem_dc, pen);
+
+                        let old_brush = SelectObject(mem_dc, windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH));
+                        let _ = Rectangle(mem_dc, zx, zy, zx + zw, zy + zh);
+                        SelectObject(mem_dc, old_brush);
+                        SelectObject(mem_dc, old_pen);
+                        let _ = DeleteObject(pen);
+
+                        // Маркер ресайза в правом нижнем углу активной зоны
+                        if is_active {
+                            let handle_size = 8;
+                            let handle_brush = CreateSolidBrush(COLORREF(0x0000FFFF)); // Желтый
+                            let rc_handle = RECT {
+                                left: zx + zw - handle_size,
+                                top: zy + zh - handle_size,
+                                right: zx + zw,
+                                bottom: zy + zh,
+                            };
+                            FillRect(mem_dc, &rc_handle, handle_brush);
+                            let _ = DeleteObject(handle_brush);
+                        }
+
+                        // Номер зоны по центру с четкой черной обводкой
+                        let mut num_text: Vec<u16> = format!("{}\0", zone.id + 1).encode_utf16().collect();
+                        SetTextColor(mem_dc, COLORREF(0x00000000));
+                        for (dx, dy) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                            let mut rc_shadow = RECT {
+                                left: rc_zone.left + dx,
+                                top: rc_zone.top + dy,
+                                right: rc_zone.right + dx,
+                                bottom: rc_zone.bottom + dy,
+                            };
+                            let mut num_text_shadow = num_text.clone();
+                            DrawTextW(mem_dc, &mut num_text_shadow, &mut rc_shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                        }
+
+                        SetTextColor(mem_dc, if is_active { COLORREF(0x0000FFFF) } else { COLORREF(0x00FFFFFF) });
+                        let mut rc_num = rc_zone;
+                        DrawTextW(mem_dc, &mut num_text, &mut rc_num, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                     }
 
-                    SetTextColor(mem_dc, if is_active { COLORREF(0x0000FFFF) } else { COLORREF(0x00FFFFFF) });
-                    let mut rc_num = rc_zone;
-                    DrawTextW(mem_dc, &mut num_text, &mut rc_num, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    SelectObject(mem_dc, old_font);
+                    let _ = DeleteObject(h_font);
+
+                    // Мгновенный аппаратный перенос кадра на экран (BitBlt без шлейфов)
+                    let _ = BitBlt(hdc, 0, 0, screen_w, screen_h, mem_dc, 0, 0, SRCCOPY);
                 }
-
-                SelectObject(mem_dc, old_font);
-                let _ = DeleteObject(h_font);
-
-                // Мгновенный аппаратный перенос кадра на экран (без шлейфов и артефактов)
-                let _ = BitBlt(hdc, 0, 0, screen_w, screen_h, mem_dc, 0, 0, SRCCOPY);
-
-                SelectObject(mem_dc, old_bmp);
-                let _ = DeleteObject(mem_bmp);
-                let _ = DeleteDC(mem_dc);
             }
 
             let _ = EndPaint(hwnd, &ps);
@@ -419,7 +448,12 @@ unsafe extern "system" fn overlay_wnd_proc(
                         state.is_dragging = true;
                     }
                     SetCapture(hwnd);
-                    let _ = InvalidateRect(hwnd, None, false);
+                    let _ = RedrawWindow(
+                        hwnd,
+                        None,
+                        HRGN(std::ptr::null_mut()),
+                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
+                    );
                 }
             }
             LRESULT(0)
@@ -454,7 +488,12 @@ unsafe extern "system" fn overlay_wnd_proc(
                         }
                     }
 
-                    let _ = InvalidateRect(hwnd, None, false);
+                    let _ = RedrawWindow(
+                        hwnd,
+                        None,
+                        HRGN(std::ptr::null_mut()),
+                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
+                    );
                 }
             }
             LRESULT(0)
@@ -468,7 +507,12 @@ unsafe extern "system" fn overlay_wnd_proc(
                     state.is_resizing = false;
                     // Сохраняем перемещенные зоны в config.json
                     let _ = state.config.read().save();
-                    let _ = InvalidateRect(hwnd, None, false);
+                    let _ = RedrawWindow(
+                        hwnd,
+                        None,
+                        HRGN(std::ptr::null_mut()),
+                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
+                    );
                 }
             }
             LRESULT(0)
@@ -477,37 +521,12 @@ unsafe extern "system" fn overlay_wnd_proc(
         WM_SETCURSOR => {
             let hit_test = (lparam.0 & 0xFFFF) as u32;
             if hit_test == HTCLIENT {
-                let mut pt = POINT::default();
-                let _ = GetCursorPos(&mut pt);
-                let _ = ScreenToClient(hwnd, &mut pt);
-
-                let mut cursor = IDC_ARROW;
-                if let Some(ref state) = *GLOBAL_OVERLAY.lock() {
-                    let screen_w = state.screen_width as f32;
-                    let screen_h = state.screen_height as f32;
-                    let px = pt.x as f32;
-                    let py = pt.y as f32;
-
-                    let cfg = state.config.read();
-                    for zone in cfg.zones.iter().rev() {
-                        let zx = zone.rect.x * screen_w;
-                        let zy = zone.rect.y * screen_h;
-                        let zw = zone.rect.width * screen_w;
-                        let zh = zone.rect.height * screen_h;
-
-                        if px >= zx && px <= zx + zw && py >= zy && py <= zy + zh {
-                            if px >= zx + zw - 14.0 && py >= zy + zh - 14.0 {
-                                cursor = IDC_SIZENWSE;
-                            } else {
-                                cursor = IDC_SIZEALL;
-                            }
-                            break;
-                        }
-                    }
+                // Стандартный курсор без зависаний и без значка загрузки
+                let h_cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+                if !h_cursor.0.is_null() {
+                    let _ = SetCursor(h_cursor);
+                    return LRESULT(1);
                 }
-
-                let _ = SetCursor(LoadCursorW(None, cursor).unwrap_or_default());
-                return LRESULT(1);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -526,6 +545,19 @@ unsafe extern "system" fn overlay_wnd_proc(
         }
 
         WM_DESTROY => {
+            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                if let Some(mem_dc) = state.mem_dc {
+                    if let Some(old_b) = state.old_bmp {
+                        SelectObject(mem_dc, old_b);
+                    }
+                    if let Some(bmp) = state.mem_bmp {
+                        let _ = DeleteObject(bmp);
+                    }
+                    let _ = DeleteDC(mem_dc);
+                }
+                state.mem_dc = None;
+                state.mem_bmp = None;
+            }
             PostQuitMessage(0);
             LRESULT(0)
         }

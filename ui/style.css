@@ -332,3 +332,14 @@ body {
   padding-top: 16px;
   margin-top: 8px;
 }
+
+.hotkey-input {
+  transition: all 0.2s ease;
+}
+
+.hotkey-input:focus {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  outline: none;
+}

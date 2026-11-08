@@ -59,3 +59,4 @@ pub fn ensure_single_instance_takeover() {
         let _ = CloseHandle(snapshot);
     }
 }
+

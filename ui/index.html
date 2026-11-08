@@ -222,6 +222,39 @@
             </label>
           </div>
         </div>
+
+        <div class="card settings-card" style="margin-top: 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2 style="font-size:16px; margin:0;">Горячие клавиши Windows</h2>
+            <label class="toggle-switch" title="Включить / отключить глобальные хоткеи">
+              <input type="checkbox" id="toggle-hotkeys-enabled" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:15px;">
+            Кликните в поле ввода и нажмите желаемое сочетание клавиш на клавиатуре:
+          </div>
+          <div class="setting-row">
+            <label>Вкл / Выкл подсветку:</label>
+            <input type="text" id="hk-toggle-power" class="input-field hotkey-input" value="Ctrl+Shift+A" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+          </div>
+          <div class="setting-row">
+            <label>Увеличить яркость (+10%):</label>
+            <input type="text" id="hk-brightness-up" class="input-field hotkey-input" value="Ctrl+Shift+Up" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+          </div>
+          <div class="setting-row">
+            <label>Уменьшить яркость (-10%):</label>
+            <input type="text" id="hk-brightness-down" class="input-field hotkey-input" value="Ctrl+Shift+Down" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+          </div>
+          <div class="setting-row">
+            <label>Оверлей зон на экране:</label>
+            <input type="text" id="hk-toggle-overlay" class="input-field hotkey-input" value="Ctrl+Shift+O" readonly style="max-width:200px; text-align:center; font-weight:600; cursor:pointer;" title="Кликните и нажмите сочетание клавиш">
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
+            <button id="btn-reset-hotkeys" class="btn btn-secondary">Сброс по умолчанию</button>
+            <button id="btn-save-hotkeys" class="btn btn-primary">Сохранить хоткеи</button>
+          </div>
+        </div>
       </section>
 
       <!-- Вкладка: Lightpack API -->

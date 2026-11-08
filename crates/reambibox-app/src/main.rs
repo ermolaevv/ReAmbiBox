@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod hotkey_parser;
 mod single_instance;
 mod tray;
 mod zone_overlay;
@@ -9,7 +10,7 @@ use reambibox_core::api::lightpack::LightpackServer;
 use reambibox_core::api::state::create_shared_state;
 use reambibox_core::capture::dxgi::DxgiCapture;
 use reambibox_core::color::smoothing::TemporalSmoother;
-use reambibox_core::config::AppConfig;
+use reambibox_core::config::{AppConfig, HotkeysConfig};
 use reambibox_core::device::adalight::AdalightDriver;
 use reambibox_core::device::traits::DeviceDriver;
 use reambibox_core::device::types::{DeviceFrame, RgbColor};
@@ -37,6 +38,7 @@ struct ConfigUpdate {
     baud_rate: Option<u32>,
     serial_port: Option<String>,
     reconnect: Option<bool>,
+    hotkeys: Option<HotkeysConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +72,7 @@ struct ApiStatusResponse {
     serial_status: String,
     available_ports: Vec<String>,
     is_overlay_visible: bool,
+    hotkeys: HotkeysConfig,
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
@@ -448,6 +451,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_capture_fps = Arc::clone(&capture_fps);
     let web_reconnect = Arc::clone(&needs_reconnect);
     let web_overlay = Arc::clone(&overlay_manager);
+    let web_tray = Arc::clone(&tray_manager);
 
     tokio::spawn(async move {
         let listener = match TcpListener::bind("127.0.0.1:3637").await {
@@ -466,6 +470,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let c_fps_ref = Arc::clone(&web_capture_fps);
             let recon_ref = Arc::clone(&web_reconnect);
             let overlay_ref = Arc::clone(&web_overlay);
+            let tray_ref = Arc::clone(&web_tray);
 
             tokio::spawn(async move {
                 let mut req_bytes = Vec::new();
@@ -557,6 +562,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         serial_status: port_status,
                         available_ports: AdalightDriver::available_ports(),
                         is_overlay_visible: overlay_ref.is_visible(),
+                        hotkeys: cfg.hotkeys.clone(),
                         zones: cfg.zones.clone(),
                     };
 
@@ -680,6 +686,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(true) = update.reconnect {
                                 println!("[API] Запрос принудительного аппаратного сброса/переподключения контроллера");
                                 recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(h) = update.hotkeys {
+                                println!("[API] Обновление настроек горячих клавиш: питание ({}), оверлей ({})", h.toggle_power, h.toggle_overlay);
+                                cfg.hotkeys = h;
+                                tray_ref.reload_hotkeys();
                             }
 
                             let _ = cfg.save();
