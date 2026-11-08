@@ -30,6 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const sliderFps = document.getElementById('slider-fps');
   const valFps = document.getElementById('val-fps');
   const selectBaud = document.getElementById('select-baud');
+  const selectPort = document.getElementById('select-port');
+  const btnReconnectPort = document.getElementById('btn-reconnect-port');
 
   const selectMonitor = document.getElementById('select-monitor');
   const selectColorOrder = document.getElementById('select-color-order');
@@ -101,6 +103,22 @@ document.addEventListener('DOMContentLoaded', () => {
   selectBaud?.addEventListener('change', (e) => {
     const baud = parseInt(e.target.value);
     queueConfigUpdate({ baud_rate: baud });
+  });
+
+  // Выбор COM-порта
+  selectPort?.addEventListener('change', (e) => {
+    queueConfigUpdate({ serial_port: e.target.value, reconnect: true });
+  });
+
+  // Кнопка аппаратного сброса / переподключения контроллера
+  btnReconnectPort?.addEventListener('click', () => {
+    btnReconnectPort.textContent = 'Сброс...';
+    btnReconnectPort.disabled = true;
+    queueConfigUpdate({ reconnect: true });
+    setTimeout(() => {
+      btnReconnectPort.textContent = 'Сброс / Переподключение';
+      btnReconnectPort.disabled = false;
+    }, 1500);
   });
 
   // Переключение режимов
@@ -224,6 +242,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (selectBaud && data.baud_rate) {
           selectBaud.value = data.baud_rate.toString();
+        }
+
+        // Заполняем доступные COM-порты
+        if (selectPort && data.available_ports) {
+          selectPort.innerHTML = '';
+          const ports = data.available_ports.length > 0 ? data.available_ports : [data.serial_port];
+          if (!ports.includes(data.serial_port)) ports.unshift(data.serial_port);
+          ports.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = `${p} ${p === data.serial_port ? '(Текущий)' : ''}`;
+            if (p === data.serial_port) opt.selected = true;
+            selectPort.appendChild(opt);
+          });
         }
 
         // Заполняем мониторы

@@ -109,11 +109,12 @@
         <div class="card settings-card">
           <div class="setting-row">
             <label>Последовательный порт (COM):</label>
-            <select id="select-port">
-              <option value="COM10" selected>COM10 (Текущий)</option>
-              <option value="COM9">COM9</option>
-              <option value="COM6">COM6</option>
-            </select>
+            <div style="display:flex; gap:10px; flex:1;">
+              <select id="select-port" style="flex:1;">
+                <option value="COM10" selected>COM10</option>
+              </select>
+              <button id="btn-reconnect-port" class="btn btn-secondary" style="white-space:nowrap; padding:6px 14px; font-size:13px;" title="Аппаратный DTR сброс контроллера и очистка буфера">Сброс / Переподключение</button>
+            </div>
           </div>
           <div class="setting-row">
             <label>Скорость передачи (Baud):</label>

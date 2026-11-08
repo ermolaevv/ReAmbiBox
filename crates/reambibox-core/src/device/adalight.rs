@@ -148,9 +148,20 @@ impl DeviceDriver for AdalightDriver {
         }
 
         info!("Подключение к Adalight на порту {} ({} бод)...", self.port_name, self.baud_rate);
-        let port = serialport::new(&self.port_name, self.baud_rate)
+        let mut port = serialport::new(&self.port_name, self.baud_rate)
             .timeout(Duration::from_millis(500))
             .open()?;
+
+        // Очищаем входные и выходные буферы COM-порта от зависших байтов предыдущих сессий
+        let _ = port.clear(serialport::ClearBuffer::All);
+
+        // Аппаратный DTR сброс микроконтроллера Arduino (эквивалент физического переподключения USB)
+        let _ = port.write_data_terminal_ready(false);
+        std::thread::sleep(Duration::from_millis(50));
+        let _ = port.write_data_terminal_ready(true);
+        let _ = port.write_request_to_send(true);
+        std::thread::sleep(Duration::from_millis(150));
+        let _ = port.clear(serialport::ClearBuffer::All);
 
         self.port = Some(port);
         info!("Успешно подключено к Adalight на {}", self.port_name);

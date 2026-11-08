@@ -33,6 +33,8 @@ struct ConfigUpdate {
     autostart: Option<bool>,
     target_fps: Option<u32>,
     baud_rate: Option<u32>,
+    serial_port: Option<String>,
+    reconnect: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,6 +66,7 @@ struct ApiStatusResponse {
     led_count: usize,
     serial_port: String,
     serial_status: String,
+    available_ports: Vec<String>,
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
@@ -141,6 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let serial_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
     let capture_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
     let is_running = Arc::new(AtomicBool::new(true));
+    let needs_reconnect = Arc::new(AtomicBool::new(false));
 
     // 2. Инициализация системного трея и мониторинга питания Windows
     let tray_manager = Arc::new(TrayManager::new());
@@ -161,6 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let fps_ref = Arc::clone(&serial_fps);
         let run_ref = Arc::clone(&is_running);
         let cfg_ref = Arc::clone(&shared_config);
+        let reconnect_ref = Arc::clone(&needs_reconnect);
 
         std::thread::spawn(move || {
             let (mut port_name, mut baud_rate, mut color_order) = {
@@ -177,6 +182,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             while run_ref.load(Ordering::Relaxed) {
                 let start = Instant::now();
+
+                // Обработка ручного запроса переподключения/сброса контроллера
+                if reconnect_ref.swap(false, Ordering::Relaxed) {
+                    println!("[Serial] Запрошен принудительный сброс и переподключение COM-порта...");
+                    let _ = driver.disconnect();
+                    last_reconnect = Instant::now() - Duration::from_secs(5);
+                }
 
                 // Периодическая проверка смены настроек порта / скорости / порядка цветов
                 let (target_fps, led_count, baud) = {
@@ -411,6 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_serial_status = Arc::clone(&serial_status);
     let web_serial_fps = Arc::clone(&serial_fps);
     let web_capture_fps = Arc::clone(&capture_fps);
+    let web_reconnect = Arc::clone(&needs_reconnect);
 
     tokio::spawn(async move {
         let listener = match TcpListener::bind("127.0.0.1:3637").await {
@@ -427,6 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let status_ref = Arc::clone(&web_serial_status);
             let s_fps_ref = Arc::clone(&web_serial_fps);
             let c_fps_ref = Arc::clone(&web_capture_fps);
+            let recon_ref = Arc::clone(&web_reconnect);
 
             tokio::spawn(async move {
                 let mut req_bytes = Vec::new();
@@ -516,6 +530,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         led_count: cfg.zones.len(),
                         serial_port: cfg.serial_port.clone(),
                         serial_status: port_status,
+                        available_ports: AdalightDriver::available_ports(),
                         zones: cfg.zones.clone(),
                     };
 
@@ -591,6 +606,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(baud) = update.baud_rate {
                                 println!("[API] Скорость порта изменена на: {}", baud);
                                 cfg.baud_rate = baud;
+                            }
+                            if let Some(port) = update.serial_port {
+                                println!("[API] Смена COM-порта на: {}", port);
+                                cfg.serial_port = port;
+                                recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(true) = update.reconnect {
+                                println!("[API] Запрос принудительного аппаратного сброса/переподключения контроллера");
+                                recon_ref.store(true, Ordering::Relaxed);
                             }
 
                             let _ = cfg.save();
