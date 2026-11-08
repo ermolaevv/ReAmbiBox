@@ -63,6 +63,22 @@ impl AdalightDriver {
             }
         }
     }
+
+    /// Попытка автоматического переподключения к порту
+    pub fn ensure_connected(&mut self) -> Result<(), DeviceError> {
+        if self.is_connected() {
+            return Ok(());
+        }
+        self.connect()
+    }
+
+    /// Отправка кадра с автоматической попыткой переподключения
+    pub fn send_frame_with_retry(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError> {
+        if !self.is_connected() {
+            let _ = self.connect();
+        }
+        self.send_frame(frame)
+    }
 }
 
 impl DeviceDriver for AdalightDriver {
@@ -150,5 +166,18 @@ mod tests {
             AdalightDriver::build_packet(&empty),
             Err(DeviceError::InvalidLedCount(0))
         ));
+    }
+
+    #[test]
+    fn test_connect_to_nonexistent_port_fails_gracefully() {
+        let mut driver = AdalightDriver::new("COM9999", 115200);
+        assert!(!driver.is_connected());
+        let res = driver.connect();
+        assert!(res.is_err());
+        assert!(!driver.is_connected());
+
+        let frame = DeviceFrame::new(vec![RgbColor::new(255, 0, 0)]);
+        let send_res = driver.send_frame(&frame);
+        assert!(matches!(send_res, Err(DeviceError::NotConnected)));
     }
 }
