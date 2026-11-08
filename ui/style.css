@@ -46,10 +46,13 @@ body {
 }
 
 .logo-icon {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #3b82f6, #ec4899);
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  background-image: url('favicon.png');
+  background-size: cover;
+  background-position: center;
+  border-radius: 8px;
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.45);
 }
 
 .nav-menu {

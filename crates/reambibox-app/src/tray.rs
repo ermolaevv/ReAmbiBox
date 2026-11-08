@@ -110,8 +110,10 @@ impl TrayManager {
                 return;
             }
 
-            // Добавляем иконку в системный трей
-            let icon: HICON = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+            // Добавляем иконку в системный трей (используем встроенную иконку ReAmbiBox, либо системную как fallback)
+            let icon: HICON = LoadIconW(HINSTANCE(instance.0), PCWSTR(1 as _))
+                .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+                .unwrap_or_default();
             let mut nid = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                 hWnd: hwnd,
