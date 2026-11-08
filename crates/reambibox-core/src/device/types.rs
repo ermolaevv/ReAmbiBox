@@ -27,6 +27,23 @@ impl RgbColor {
             b: (self.b as f32 * factor).round() as u8,
         }
     }
+
+    /// Коррекция яркости и гаммы для соответствия человеческому восприятию
+    #[inline]
+    pub fn with_brightness_gamma(self, brightness: f32, gamma: f32) -> Self {
+        let b = brightness.clamp(0.0, 1.0);
+        let g = if gamma > 0.1 { gamma } else { 1.0 };
+        let apply = |ch: u8| -> u8 {
+            let normalized = (ch as f32 / 255.0) * b;
+            let corrected = normalized.powf(g).clamp(0.0, 1.0);
+            (corrected * 255.0).round() as u8
+        };
+        Self {
+            r: apply(self.r),
+            g: apply(self.g),
+            b: apply(self.b),
+        }
+    }
 }
 
 impl From<(u8, u8, u8)> for RgbColor {

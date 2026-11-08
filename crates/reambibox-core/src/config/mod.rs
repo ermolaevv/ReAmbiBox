@@ -16,7 +16,25 @@ pub struct AppConfig {
     pub gamma: f32,
     pub letterbox_detection: bool,
     pub target_fps: u32,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default = "default_color_order")]
+    pub color_order: String,
+    #[serde(default = "default_static_color")]
+    pub static_color: [u8; 3],
     pub zones: Vec<Zone>,
+}
+
+fn default_mode() -> String {
+    "screen".to_string()
+}
+
+fn default_color_order() -> String {
+    "RGB".to_string()
+}
+
+fn default_static_color() -> [u8; 3] {
+    [255, 255, 255]
 }
 
 impl Default for AppConfig {
@@ -33,6 +51,9 @@ impl Default for AppConfig {
             gamma: 2.2,
             letterbox_detection: true,
             target_fps: 60,
+            mode: default_mode(),
+            color_order: default_color_order(),
+            static_color: default_static_color(),
             zones,
         }
     }

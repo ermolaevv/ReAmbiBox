@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 pub struct AdalightDriver {
     port_name: String,
     baud_rate: u32,
+    color_order: String,
     port: Option<Box<dyn SerialPort>>,
 }
 
@@ -20,12 +21,17 @@ impl AdalightDriver {
         Self {
             port_name: port_name.into(),
             baud_rate,
+            color_order: "RGB".to_string(),
             port: None,
         }
     }
 
-    /// Формирование полного бинарного пакета протокола Adalight
-    pub fn build_packet(colors: &[RgbColor]) -> Result<Vec<u8>, DeviceError> {
+    pub fn set_color_order(&mut self, order: impl Into<String>) {
+        self.color_order = order.into();
+    }
+
+    /// Формирование полного бинарного пакета протокола Adalight с учетом порядка цветов
+    pub fn build_packet_with_order(colors: &[RgbColor], order: &str) -> Result<Vec<u8>, DeviceError> {
         let count = colors.len();
         if count == 0 {
             return Err(DeviceError::InvalidLedCount(0));
@@ -44,13 +50,31 @@ impl AdalightDriver {
         packet.push(lo);
         packet.push(checksum);
 
+        let is_grb = order.eq_ignore_ascii_case("GRB");
+        let is_bgr = order.eq_ignore_ascii_case("BGR");
+
         for color in colors {
-            packet.push(color.r);
-            packet.push(color.g);
-            packet.push(color.b);
+            if is_grb {
+                packet.push(color.g);
+                packet.push(color.r);
+                packet.push(color.b);
+            } else if is_bgr {
+                packet.push(color.b);
+                packet.push(color.g);
+                packet.push(color.r);
+            } else {
+                packet.push(color.r);
+                packet.push(color.g);
+                packet.push(color.b);
+            }
         }
 
         Ok(packet)
+    }
+
+    /// Формирование стандартного RGB бинарного пакета протокола Adalight
+    pub fn build_packet(colors: &[RgbColor]) -> Result<Vec<u8>, DeviceError> {
+        Self::build_packet_with_order(colors, "RGB")
     }
 
     /// Получение списка всех доступных COM-портов в системе
@@ -93,7 +117,7 @@ impl DeviceDriver for AdalightDriver {
 
         info!("Подключение к Adalight на порту {} ({} бод)...", self.port_name, self.baud_rate);
         let port = serialport::new(&self.port_name, self.baud_rate)
-            .timeout(Duration::from_millis(100))
+            .timeout(Duration::from_millis(500))
             .open()?;
 
         self.port = Some(port);
@@ -114,7 +138,7 @@ impl DeviceDriver for AdalightDriver {
     }
 
     fn send_frame(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError> {
-        let packet = Self::build_packet(&frame.colors)?;
+        let packet = Self::build_packet_with_order(&frame.colors, &self.color_order)?;
 
         let port = match self.port.as_mut() {
             Some(p) => p,

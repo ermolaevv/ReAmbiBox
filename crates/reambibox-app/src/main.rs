@@ -21,18 +21,38 @@ struct ConfigUpdate {
     gamma: Option<f32>,
     letterbox: Option<bool>,
     is_active: Option<bool>,
+    mode: Option<String>,
+    color_order: Option<String>,
+    static_color: Option<[u8; 3]>,
+    selected_monitor: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiMonitorInfo {
+    index: usize,
+    name: String,
+    width: u32,
+    height: u32,
+    is_primary: bool,
 }
 
 #[derive(Debug, Serialize)]
 struct ApiStatusResponse {
     is_active: bool,
-    fps: f32,
+    capture_fps: f32,
+    serial_fps: f32,
     brightness: f32,
     smoothing: f32,
     gamma: f32,
     letterbox: bool,
+    mode: String,
+    color_order: String,
+    static_color: [u8; 3],
+    selected_monitor: usize,
+    monitors: Vec<ApiMonitorInfo>,
     led_count: usize,
     serial_port: String,
+    serial_status: String,
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
@@ -42,12 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("        ReAmbiBox v0.1.0 — High-Performance Ambilight      ");
     println!("============================================================");
 
-    // 1. Загрузка конфигурации (98 зон из AmbiBox)
+    // 1. Загрузка конфигурации
     let initial_cfg = AppConfig::load();
     println!("Загружена конфигурация:");
-    println!("  - COM-порт: {} ({} бод)", initial_cfg.serial_port, initial_cfg.baud_rate);
+    println!("  - COM-порт: {} ({} бод, порядок: {})", initial_cfg.serial_port, initial_cfg.baud_rate, initial_cfg.color_order);
     println!("  - Активных светодиодных зон: {}", initial_cfg.zones.len());
-    println!("  - Сглаживание: {:.2}, Яркость: {:.2}", initial_cfg.smoothing, initial_cfg.brightness);
+    println!("  - Режим: {}, Яркость: {:.0}%, Сглаживание: {:.2}, Гамма: {:.1}",
+             initial_cfg.mode, initial_cfg.brightness * 100.0, initial_cfg.smoothing, initial_cfg.gamma);
 
     let shared_config = Arc::new(RwLock::new(initial_cfg.clone()));
     let shared_state = create_shared_state();
@@ -59,6 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         s.gamma = initial_cfg.gamma;
     }
 
+    // Разделяемые структуры между потоками захвата, вывода и веб-сервера
+    let output_colors = Arc::new(parking_lot::RwLock::new(vec![RgbColor::BLACK; initial_cfg.zones.len()]));
+    let serial_status = Arc::new(parking_lot::RwLock::new(String::from("Инициализация...")));
+    let serial_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
+    let capture_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
+    let is_running = Arc::new(AtomicBool::new(true));
+
     // 2. Запуск Lightpack API сервера (порт 3636)
     let lp_server = LightpackServer::new(shared_state.clone(), LightpackServer::DEFAULT_PORT);
     tokio::spawn(async move {
@@ -66,11 +94,244 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     println!(">>> [OK] Lightpack API сервер активен на 127.0.0.1:3636");
 
-    // 3. Запуск WebUI + REST API сервера (порт 3637)
+    // 3. Выделенный независимый аппаратный поток вывода в COM-порт (Adalight)
+    {
+        let colors_ref = Arc::clone(&output_colors);
+        let status_ref = Arc::clone(&serial_status);
+        let fps_ref = Arc::clone(&serial_fps);
+        let run_ref = Arc::clone(&is_running);
+        let cfg_ref = Arc::clone(&shared_config);
+
+        std::thread::spawn(move || {
+            let initial = {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async { cfg_ref.read().await.clone() })
+            };
+
+            let mut port_name = initial.serial_port.clone();
+            let baud_rate = initial.baud_rate;
+            let mut color_order = initial.color_order.clone();
+
+            let mut driver = AdalightDriver::new(&port_name, baud_rate);
+            driver.set_color_order(&color_order);
+
+            let mut last_reconnect = Instant::now() - Duration::from_secs(5);
+            let mut sent_frames: u64 = 0;
+            let mut last_fps_time = Instant::now();
+
+            // Такт отправки: 28 мс (~35 FPS) — оптимальный максимум для 115200 бод без переполнения буфера
+            let frame_interval = Duration::from_millis(28);
+
+            while run_ref.load(Ordering::Relaxed) {
+                let start = Instant::now();
+
+                // Периодическая проверка смены настроек порта / порядка цветов
+                if let Ok(cfg) = cfg_ref.try_read() {
+                    if cfg.serial_port != port_name {
+                        port_name = cfg.serial_port.clone();
+                        let _ = driver.disconnect();
+                        driver = AdalightDriver::new(&port_name, baud_rate);
+                    }
+                    if cfg.color_order != color_order {
+                        color_order = cfg.color_order.clone();
+                        driver.set_color_order(&color_order);
+                    }
+                }
+
+                // Автопереподключение к порту при необходимости
+                if !driver.is_connected() {
+                    if last_reconnect.elapsed() >= Duration::from_millis(1500) {
+                        last_reconnect = Instant::now();
+                        match driver.connect() {
+                            Ok(_) => {
+                                println!(">>> [OK] Успешно подключено к Adalight на порту {} (порядок: {})", port_name, color_order);
+                                *status_ref.write() = format!("Подключено ({})", port_name);
+                            }
+                            Err(e) => {
+                                *status_ref.write() = format!("Ожидание порта {} ({})", port_name, e);
+                            }
+                        }
+                    }
+                }
+
+                if driver.is_connected() {
+                    let colors = {
+                        let lock = colors_ref.read();
+                        lock.clone()
+                    };
+
+                    let frame = DeviceFrame::new(colors);
+                    match driver.send_frame(&frame) {
+                        Ok(_) => {
+                            sent_frames += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("[Serial] Ошибка записи в {}: {}", port_name, e);
+                            *status_ref.write() = format!("Ошибка: {}", e);
+                            // send_frame автоматически сбрасывает порт в None при обрыве
+                        }
+                    }
+                }
+
+                // Подсчет реального Serial FPS
+                if last_fps_time.elapsed() >= Duration::from_secs(1) {
+                    let fps = (sent_frames as f64) / last_fps_time.elapsed().as_secs_f64();
+                    *fps_ref.write() = fps as f32;
+                    sent_frames = 0;
+                    last_fps_time = Instant::now();
+                }
+
+                let elapsed = start.elapsed();
+                if elapsed < frame_interval {
+                    std::thread::sleep(frame_interval - elapsed);
+                }
+            }
+        });
+    }
+
+    // 4. Выделенный поток DXGI захвата экрана и цветового процессинга
+    {
+        let colors_ref = Arc::clone(&output_colors);
+        let cfg_ref = Arc::clone(&shared_config);
+        let state_ref = Arc::clone(&shared_state);
+        let fps_ref = Arc::clone(&capture_fps);
+        let run_ref = Arc::clone(&is_running);
+
+        std::thread::spawn(move || {
+            let mut current_mon: usize = 99999;
+            let mut capture: Option<DxgiCapture> = None;
+            let mut smoother = TemporalSmoother::new();
+            let mut last_sampled: Vec<RgbColor> = Vec::new();
+            let mut frames_count: u64 = 0;
+            let mut last_fps_time = Instant::now();
+
+            while run_ref.load(Ordering::Relaxed) {
+                let start = Instant::now();
+
+                // Читаем актуальные параметры синхронно
+                let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones) = {
+                    if let (Ok(cfg), Ok(st)) = (cfg_ref.try_read(), state_ref.try_read()) {
+                        (
+                            cfg.selected_monitor,
+                            st.is_active,
+                            cfg.brightness,
+                            cfg.smoothing,
+                            cfg.gamma,
+                            cfg.mode.clone(),
+                            cfg.static_color,
+                            cfg.zones.clone(),
+                        )
+                    } else {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                };
+
+                let led_count = zones.len();
+                if last_sampled.len() != led_count {
+                    last_sampled = vec![RgbColor::BLACK; led_count];
+                }
+
+                // Обработка состояния: Выключено
+                if !is_active {
+                    {
+                        let mut out = colors_ref.write();
+                        *out = vec![RgbColor::BLACK; led_count];
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
+                // Обработка режима: Статический тестовый цвет (White / Test)
+                if mode == "static" {
+                    let base = RgbColor::new(static_color[0], static_color[1], static_color[2]);
+                    let dimmed = base.with_brightness_gamma(brightness, gamma);
+                    {
+                        let mut out = colors_ref.write();
+                        *out = vec![dimmed; led_count];
+                    }
+                    frames_count += 1;
+                    if last_fps_time.elapsed() >= Duration::from_secs(1) {
+                        *fps_ref.write() = (frames_count as f64 / last_fps_time.elapsed().as_secs_f64()) as f32;
+                        frames_count = 0;
+                        last_fps_time = Instant::now();
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+
+                // Обработка режима: Захват экрана (Screen Capture)
+                if mon_idx != current_mon || capture.is_none() {
+                    match DxgiCapture::new(mon_idx) {
+                        Ok(c) => {
+                            println!(">>> [OK] DXGI захват переключен на монитор {}", mon_idx);
+                            capture = Some(c);
+                            current_mon = mon_idx;
+                        }
+                        Err(e) => {
+                            eprintln!("Ошибка инициализации DXGI для монитора {}: {}", mon_idx, e);
+                            std::thread::sleep(Duration::from_millis(500));
+                            continue;
+                        }
+                    }
+                }
+
+                if let Some(ref mut cap) = capture {
+                    match cap.capture_frame(Duration::from_millis(33)) {
+                        Ok(frame) => {
+                            last_sampled = zones.iter().map(|z| z.sample_color(&frame, 4)).collect();
+                            frames_count += 1;
+                        }
+                        Err(reambibox_core::capture::CaptureError::Timeout) => {
+                            // Экран не изменился, используем предыдущие цвета
+                        }
+                        Err(reambibox_core::capture::CaptureError::AccessLost) => {
+                            std::thread::sleep(Duration::from_millis(200));
+                            let _ = cap.reconnect();
+                        }
+                        Err(_) => {
+                            std::thread::sleep(Duration::from_millis(15));
+                        }
+                    }
+
+                    // Временное сглаживание
+                    let smoothed = smoother.smooth(&last_sampled, smoothing);
+
+                    // Коррекция яркости и гаммы в реальном времени
+                    let final_colors: Vec<_> = smoothed
+                        .into_iter()
+                        .map(|c| c.with_brightness_gamma(brightness, gamma))
+                        .collect();
+
+                    {
+                        let mut out = colors_ref.write();
+                        *out = final_colors;
+                    }
+                }
+
+                if last_fps_time.elapsed() >= Duration::from_secs(1) {
+                    *fps_ref.write() = (frames_count as f64 / last_fps_time.elapsed().as_secs_f64()) as f32;
+                    frames_count = 0;
+                    last_fps_time = Instant::now();
+                }
+
+                let elapsed = start.elapsed();
+                if elapsed < Duration::from_millis(16) {
+                    std::thread::sleep(Duration::from_millis(16) - elapsed);
+                }
+            }
+        });
+    }
+
+    println!(">>> [OK] Аппаратный поток DXGI захвата активен.");
+    println!(">>> [OK] Выделенный поток COM-порта активен.");
+
+    // 5. Запуск WebUI + REST API сервера (порт 3637)
     let web_config = Arc::clone(&shared_config);
     let web_state = Arc::clone(&shared_state);
-    let live_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
-    let web_fps = Arc::clone(&live_fps);
+    let web_serial_status = Arc::clone(&serial_status);
+    let web_serial_fps = Arc::clone(&serial_fps);
+    let web_capture_fps = Arc::clone(&capture_fps);
 
     tokio::spawn(async move {
         let listener = match TcpListener::bind("127.0.0.1:3637").await {
@@ -84,223 +345,199 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok((mut stream, _)) = listener.accept().await {
             let config_ref = Arc::clone(&web_config);
             let state_ref = Arc::clone(&web_state);
-            let fps_ref = Arc::clone(&web_fps);
+            let status_ref = Arc::clone(&web_serial_status);
+            let s_fps_ref = Arc::clone(&web_serial_fps);
+            let c_fps_ref = Arc::clone(&web_capture_fps);
 
             tokio::spawn(async move {
-                let mut buf = vec![0u8; 8192];
-                if let Ok(n) = stream.read(&mut buf).await {
-                    if n == 0 {
-                        return;
-                    }
-                    let req = String::from_utf8_lossy(&buf[..n]);
+                let mut req_bytes = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut content_length: Option<usize> = None;
+                let mut header_len = 0;
 
-                    // API: GET /api/config
-                    if req.starts_with("GET /api/config") {
-                        let cfg = config_ref.read().await;
-                        let state = state_ref.read().await;
-                        let fps = *fps_ref.read();
+                loop {
+                    let n = match stream.read(&mut chunk).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    req_bytes.extend_from_slice(&chunk[..n]);
 
-                        let res_obj = ApiStatusResponse {
-                            is_active: state.is_active,
-                            fps,
-                            brightness: cfg.brightness,
-                            smoothing: cfg.smoothing,
-                            gamma: cfg.gamma,
-                            letterbox: cfg.letterbox_detection,
-                            led_count: cfg.zones.len(),
-                            serial_port: cfg.serial_port.clone(),
-                            zones: cfg.zones.clone(),
-                        };
-
-                        let json = serde_json::to_string(&res_obj).unwrap_or_default();
-                        let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                            json.len(),
-                            json
-                        );
-                        let _ = stream.write_all(response.as_bytes()).await;
-                        return;
-                    }
-
-                    // API: POST /api/config
-                    if req.starts_with("POST /api/config") {
-                        if let Some(body_start) = req.find("\r\n\r\n") {
-                            let body = &req[body_start + 4..];
-                            if let Ok(update) = serde_json::from_str::<ConfigUpdate>(body) {
-                                let mut cfg = config_ref.write().await;
-                                let mut state = state_ref.write().await;
-
-                                if let Some(b) = update.brightness {
-                                    cfg.brightness = b;
-                                    state.brightness = b;
+                    if header_len == 0 {
+                        if let Some(pos) = req_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                            header_len = pos + 4;
+                            let header_str = String::from_utf8_lossy(&req_bytes[..pos]);
+                            for line in header_str.lines() {
+                                if line.to_ascii_lowercase().starts_with("content-length:") {
+                                    if let Some(val) = line.split(':').nth(1) {
+                                        content_length = val.trim().parse().ok();
+                                    }
                                 }
-                                if let Some(s) = update.smoothing {
-                                    cfg.smoothing = s;
-                                    state.smooth = s;
-                                }
-                                if let Some(g) = update.gamma {
-                                    cfg.gamma = g;
-                                    state.gamma = g;
-                                }
-                                if let Some(lb) = update.letterbox {
-                                    cfg.letterbox_detection = lb;
-                                }
-                                if let Some(act) = update.is_active {
-                                    state.is_active = act;
-                                }
-
-                                let _ = cfg.save();
                             }
                         }
-
-                        let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
-                        let _ = stream.write_all(response.as_bytes()).await;
-                        return;
                     }
 
-                    // Статика: CSS, JS, HTML
-                    let (content_type, body) = if req.starts_with("GET /style.css") {
-                        ("text/css", include_str!("../../../ui/style.css"))
-                    } else if req.starts_with("GET /app.js") {
-                        ("application/javascript", include_str!("../../../ui/app.js"))
-                    } else {
-                        ("text/html; charset=utf-8", include_str!("../../../ui/index.html"))
+                    if let Some(len) = content_length {
+                        if req_bytes.len() >= header_len + len {
+                            break;
+                        }
+                    } else if header_len > 0 {
+                        break;
+                    }
+                }
+
+                if req_bytes.is_empty() {
+                    return;
+                }
+
+                let req_text = String::from_utf8_lossy(&req_bytes);
+
+                // CORS Preflight OPTIONS
+                if req_text.starts_with("OPTIONS") {
+                    let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n";
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // API: GET /api/config
+                if req_text.starts_with("GET /api/config") {
+                    let cfg = config_ref.read().await;
+                    let state = state_ref.read().await;
+                    let c_fps = *c_fps_ref.read();
+                    let s_fps = *s_fps_ref.read();
+                    let port_status = status_ref.read().clone();
+
+                    let monitors_raw = DxgiCapture::list_monitors();
+                    let monitors: Vec<_> = monitors_raw
+                        .into_iter()
+                        .map(|m| ApiMonitorInfo {
+                            index: m.index,
+                            name: format!("{}: {} ({}x{})", m.index, m.output_name, m.width, m.height),
+                            width: m.width,
+                            height: m.height,
+                            is_primary: m.is_primary,
+                        })
+                        .collect();
+
+                    let res_obj = ApiStatusResponse {
+                        is_active: state.is_active,
+                        capture_fps: c_fps,
+                        serial_fps: s_fps,
+                        brightness: cfg.brightness,
+                        smoothing: cfg.smoothing,
+                        gamma: cfg.gamma,
+                        letterbox: cfg.letterbox_detection,
+                        mode: cfg.mode.clone(),
+                        color_order: cfg.color_order.clone(),
+                        static_color: cfg.static_color,
+                        selected_monitor: cfg.selected_monitor,
+                        monitors,
+                        led_count: cfg.zones.len(),
+                        serial_port: cfg.serial_port.clone(),
+                        serial_status: port_status,
+                        zones: cfg.zones.clone(),
                     };
 
+                    let json = serde_json::to_string(&res_obj).unwrap_or_default();
                     let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        content_type,
-                        body.as_bytes().len(),
-                        body
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        json.len(),
+                        json
                     );
                     let _ = stream.write_all(response.as_bytes()).await;
+                    return;
                 }
+
+                // API: POST /api/config
+                if req_text.starts_with("POST /api/config") {
+                    if let Some(pos) = req_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let body_slice = &req_bytes[pos + 4..];
+                        if let Ok(update) = serde_json::from_slice::<ConfigUpdate>(body_slice) {
+                            let mut cfg = config_ref.write().await;
+                            let mut state = state_ref.write().await;
+
+                            if let Some(b) = update.brightness {
+                                cfg.brightness = b;
+                                state.brightness = b;
+                                println!("[API] Яркость изменена: {:.0}%", b * 100.0);
+                            }
+                            if let Some(s) = update.smoothing {
+                                cfg.smoothing = s;
+                                state.smooth = s;
+                            }
+                            if let Some(g) = update.gamma {
+                                cfg.gamma = g;
+                                state.gamma = g;
+                            }
+                            if let Some(lb) = update.letterbox {
+                                cfg.letterbox_detection = lb;
+                            }
+                            if let Some(act) = update.is_active {
+                                state.is_active = act;
+                                println!("[API] Питание: {}", if act { "ВКЛ" } else { "ВЫКЛ" });
+                            }
+                            if let Some(m) = update.mode {
+                                println!("[API] Режим изменен на: {}", m);
+                                cfg.mode = m;
+                            }
+                            if let Some(order) = update.color_order {
+                                println!("[API] Порядок цветов: {}", order);
+                                cfg.color_order = order;
+                            }
+                            if let Some(sc) = update.static_color {
+                                cfg.static_color = sc;
+                            }
+                            if let Some(mon) = update.selected_monitor {
+                                println!("[API] Выбран монитор: {}", mon);
+                                cfg.selected_monitor = mon;
+                            }
+
+                            let _ = cfg.save();
+                        }
+                    }
+
+                    let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // Статика: CSS, JS, HTML
+                let (content_type, body) = if req_text.starts_with("GET /style.css") {
+                    ("text/css", include_str!("../../../ui/style.css"))
+                } else if req_text.starts_with("GET /app.js") {
+                    ("application/javascript", include_str!("../../../ui/app.js"))
+                } else {
+                    ("text/html; charset=utf-8", include_str!("../../../ui/index.html"))
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    content_type,
+                    body.as_bytes().len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
             });
         }
     });
-    println!(">>> [OK] Web Панель управления доступна по адресу: http://localhost:3637");
 
-    // 4. Подключение к Adalight (COM10)
-    let mut driver = AdalightDriver::new(&initial_cfg.serial_port, initial_cfg.baud_rate);
-    match driver.connect() {
-        Ok(_) => println!(">>> [OK] Успешно открыт порт {} для {} зон", initial_cfg.serial_port, initial_cfg.zones.len()),
-        Err(e) => eprintln!("Предупреждение по порту {}: {}", initial_cfg.serial_port, e),
-    }
+    println!(">>> [OK] Web Панель управления доступна по адресу: http://localhost:3637\n");
 
-    // 5. Разделяемый буфер кадра DXGI для многопоточной развязки
-    let latest_frame = Arc::new(parking_lot::RwLock::new(None));
-    let is_running = Arc::new(AtomicBool::new(true));
-
-    let capture_frame_ref = Arc::clone(&latest_frame);
-    let capture_running = Arc::clone(&is_running);
-    let selected_mon = initial_cfg.selected_monitor;
-
-    std::thread::spawn(move || {
-        let mut capture = match DxgiCapture::new(selected_mon) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Ошибка инициализации DXGI: {}", e);
-                return;
-            }
-        };
-
-        while capture_running.load(Ordering::Relaxed) {
-            match capture.capture_frame(Duration::from_millis(33)) {
-                Ok(frame) => {
-                    let mut lock = capture_frame_ref.write();
-                    *lock = Some(frame);
-                }
-                Err(reambibox_core::capture::CaptureError::Timeout) => {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(reambibox_core::capture::CaptureError::AccessLost) => {
-                    std::thread::sleep(Duration::from_millis(300));
-                    let _ = capture.reconnect();
-                }
-                Err(_) => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-        }
-    });
-
-    println!(">>> [OK] Аппаратный поток DXGI захвата активен.");
-    println!(">>> [OK] Сквозной конвейер стриминга 98 светодиодов в COM10 запущен!\n");
-
-    let mut smoother = TemporalSmoother::new();
-    let mut last_colors: Vec<RgbColor> = vec![RgbColor::BLACK; initial_cfg.zones.len()];
-    let target_interval = Duration::from_millis(16); // 60 FPS таргет
-
-    let mut last_stats = Instant::now();
-    let mut sent_frames = 0;
-
+    // Главный цикл держит процесс живым и периодически выводит статус
+    let mut stats_timer = Instant::now();
     loop {
-        let loop_start = Instant::now();
-
-        // 1. Читаем актуальное динамическое состояние (яркость, активность, сглаживание)
-        let (is_active, brightness, smoothing, zones) = {
-            let state = shared_state.read().await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        if stats_timer.elapsed() >= Duration::from_secs(3) {
             let cfg = shared_config.read().await;
-            (state.is_active, cfg.brightness, cfg.smoothing, cfg.zones.clone())
-        };
-
-        if is_active {
-            // 2. Расчет цветов зон по последнему кадру экрана
-            let new_colors = {
-                let lock = latest_frame.read();
-                if let Some(ref frame) = *lock {
-                    let sampled: Vec<_> = zones.iter().map(|z| z.sample_color(frame, 4)).collect();
-                    Some(sampled)
-                } else {
-                    None
-                }
-            };
-
-            if let Some(sampled) = new_colors {
-                last_colors = sampled;
-            }
-
-            // 3. Временное сглаживание
-            let smoothed = smoother.smooth(&last_colors, smoothing);
-
-            // 4. Коррекция яркости в реальном времени!
-            let final_colors: Vec<_> = smoothed
-                .into_iter()
-                .map(|c| c.with_brightness(brightness))
-                .collect();
-
-            // 5. Передача пакета в COM10
-            if driver.is_connected() {
-                let frame = DeviceFrame::new(final_colors);
-                let _ = driver.send_frame(&frame);
-                sent_frames += 1;
-            }
-        } else {
-            // Если подсветка выключена, гасим диоды
-            if driver.is_connected() {
-                let black_frame = DeviceFrame::new(vec![RgbColor::BLACK; zones.len()]);
-                let _ = driver.send_frame(&black_frame);
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            continue;
-        }
-
-        // Подсчет и публикация реального FPS
-        if last_stats.elapsed() >= Duration::from_secs(2) {
-            let fps = (sent_frames as f64) / last_stats.elapsed().as_secs_f64();
-            *live_fps.write() = fps as f32;
+            let c_fps = *capture_fps.read();
+            let s_fps = *serial_fps.read();
+            let status = serial_status.read().clone();
 
             println!(
-                "[Статистика] Скорость: {:.1} FPS | Зон: {} | Яркость: {:.0}% | Порт: {}",
-                fps, zones.len(), brightness * 100.0, initial_cfg.serial_port
+                "[Статус] Экран: {:.1} FPS | Порт: {:.1} FPS | Яркость: {:.0}% | Статус: {}",
+                c_fps, s_fps, cfg.brightness * 100.0, status
             );
-            sent_frames = 0;
-            last_stats = Instant::now();
-        }
-
-        let elapsed = loop_start.elapsed();
-        if elapsed < target_interval {
-            tokio::time::sleep(target_interval - elapsed).await;
+            stats_timer = Instant::now();
         }
     }
 }

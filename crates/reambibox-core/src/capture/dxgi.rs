@@ -305,3 +305,20 @@ impl DxgiCapture {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enumerate_monitors() {
+        let monitors = DxgiCapture::list_monitors();
+        println!("\n=== ОБНАРУЖЕННЫЕ МОНИТОРЫ (всего: {}) ===", monitors.len());
+        for m in &monitors {
+            println!(
+                "  [{}] {} | {} | {}x{} | Primary: {}",
+                m.index, m.adapter_name, m.output_name, m.width, m.height, m.is_primary
+            );
+        }
+    }
+}

@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const btnPower = document.getElementById('toggle-power');
+  const btnModeToggle = document.getElementById('btn-mode-toggle');
+  const btnModeScreen = document.getElementById('btn-mode-screen');
+  const btnModeStatic = document.getElementById('btn-mode-static');
+
   const sliderBrightness = document.getElementById('slider-brightness');
   const valBrightness = document.getElementById('val-brightness');
   const sliderSmoothing = document.getElementById('slider-smoothing');
@@ -22,56 +26,106 @@ document.addEventListener('DOMContentLoaded', () => {
   const sliderGamma = document.getElementById('slider-gamma');
   const valGamma = document.getElementById('val-gamma');
   const toggleLetterbox = document.getElementById('toggle-letterbox');
+
+  const selectMonitor = document.getElementById('select-monitor');
+  const selectColorOrder = document.getElementById('select-color-order');
   const systemStatus = document.getElementById('system-status');
   const canvas = document.getElementById('monitor-canvas');
 
   let currentConfig = null;
+  let updateTimer = null;
+  let pendingUpdates = {};
 
-  // Отправка обновленных настроек на бэкенд
-  async function updateConfig(partial) {
-    try {
-      await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(partial)
-      });
-    } catch (e) {
-      console.error('Ошибка отправки настроек:', e);
-    }
+  // Быстрая отправка с дебаунсом 30 мс
+  function queueConfigUpdate(partial) {
+    Object.assign(pendingUpdates, partial);
+    if (updateTimer) clearTimeout(updateTimer);
+    updateTimer = setTimeout(async () => {
+      const payload = { ...pendingUpdates };
+      pendingUpdates = {};
+      try {
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) {
+        console.error('Ошибка отправки настроек:', e);
+      }
+    }, 30);
   }
 
   // Привязка ползунка яркости
   sliderBrightness?.addEventListener('input', (e) => {
     const val = parseInt(e.target.value);
     valBrightness.textContent = val + '%';
-    updateConfig({ brightness: val / 100.0 });
+    queueConfigUpdate({ brightness: val / 100.0 });
   });
 
   // Привязка сглаживания
   sliderSmoothing?.addEventListener('input', (e) => {
     const val = parseInt(e.target.value);
     valSmoothing.textContent = (val / 100).toFixed(2);
-    updateConfig({ smoothing: val / 100.0 });
+    queueConfigUpdate({ smoothing: val / 100.0 });
   });
 
   // Привязка гаммы
   sliderGamma?.addEventListener('input', (e) => {
     const val = parseInt(e.target.value);
     valGamma.textContent = (val / 10).toFixed(1);
-    updateConfig({ gamma: val / 10.0 });
+    queueConfigUpdate({ gamma: val / 10.0 });
   });
 
   // Привязка детектора 21:9
   toggleLetterbox?.addEventListener('change', (e) => {
-    updateConfig({ letterbox: e.target.checked });
+    queueConfigUpdate({ letterbox: e.target.checked });
+  });
+
+  // Переключение режимов
+  function setMode(mode) {
+    if (mode === 'static') {
+      btnModeStatic?.classList.remove('btn-secondary');
+      btnModeStatic?.classList.add('btn-primary');
+      btnModeScreen?.classList.remove('btn-primary');
+      btnModeScreen?.classList.add('btn-secondary');
+      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Захват экрана';
+    } else {
+      btnModeScreen?.classList.remove('btn-secondary');
+      btnModeScreen?.classList.add('btn-primary');
+      btnModeStatic?.classList.remove('btn-primary');
+      btnModeStatic?.classList.add('btn-secondary');
+      if (btnModeToggle) btnModeToggle.textContent = 'Тест белым (100% LED)';
+    }
+    queueConfigUpdate({ mode });
+  }
+
+  btnModeScreen?.addEventListener('click', () => setMode('screen'));
+  btnModeStatic?.addEventListener('click', () => setMode('static'));
+
+  btnModeToggle?.addEventListener('click', () => {
+    if (!currentConfig) return;
+    const newMode = (currentConfig.mode === 'static') ? 'screen' : 'static';
+    currentConfig.mode = newMode;
+    setMode(newMode);
+  });
+
+  // Выбор монитора
+  selectMonitor?.addEventListener('change', (e) => {
+    const mon = parseInt(e.target.value);
+    queueConfigUpdate({ selected_monitor: mon });
+  });
+
+  // Выбор порядка цветов (RGB / GRB)
+  selectColorOrder?.addEventListener('change', (e) => {
+    queueConfigUpdate({ color_order: e.target.value });
   });
 
   // Кнопка включения/выключения
   btnPower?.addEventListener('click', async () => {
     if (!currentConfig) return;
     const newState = !currentConfig.is_active;
-    await updateConfig({ is_active: newState });
     currentConfig.is_active = newState;
+    queueConfigUpdate({ is_active: newState });
     updatePowerButton(newState);
   });
 
@@ -92,14 +146,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvas || !zones) return;
     canvas.innerHTML = '';
 
-    zones.forEach((z, idx) => {
+    zones.forEach((z) => {
       const box = document.createElement('div');
       box.className = 'zone-box';
       box.style.left = (z.rect.x * 100) + '%';
       box.style.top = (z.rect.y * 100) + '%';
       box.style.width = (z.rect.width * 100) + '%';
       box.style.height = (z.rect.height * 100) + '%';
-      box.textContent = (z.id + 1); // 1-based для соответствия AmbiBox
+      box.textContent = (z.id + 1);
       box.title = `Зона ${z.id + 1}: [x=${(z.rect.x*100).toFixed(1)}%, y=${(z.rect.y*100).toFixed(1)}%]`;
       canvas.appendChild(box);
     });
@@ -115,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Обновляем статус в сайдбаре
       if (systemStatus) {
-        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} (${data.serial_port}, ${data.fps.toFixed(1)} FPS)`;
+        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} | Экран: ${data.capture_fps.toFixed(0)} FPS | Порт: ${data.serial_fps.toFixed(0)} FPS`;
       }
 
       updatePowerButton(data.is_active);
@@ -123,6 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Синхронизируем контролы только при первой загрузке
       if (!window.__initialized) {
         window.__initialized = true;
+
         if (sliderBrightness) {
           sliderBrightness.value = Math.round(data.brightness * 100);
           valBrightness.textContent = sliderBrightness.value + '%';
@@ -138,6 +193,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (toggleLetterbox) {
           toggleLetterbox.checked = data.letterbox;
         }
+
+        // Заполняем мониторы
+        if (selectMonitor && data.monitors) {
+          selectMonitor.innerHTML = '';
+          data.monitors.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.index;
+            opt.textContent = m.name + (m.is_primary ? ' [Основной]' : '');
+            if (m.index === data.selected_monitor) opt.selected = true;
+            selectMonitor.appendChild(opt);
+          });
+        }
+
+        // Заполняем порядок цветов
+        if (selectColorOrder && data.color_order) {
+          selectColorOrder.value = data.color_order;
+        }
+
+        setMode(data.mode || 'screen');
         renderZones(data.zones);
       }
     } catch (e) {
@@ -146,5 +220,5 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   fetchStatus();
-  setInterval(fetchStatus, 1500);
+  setInterval(fetchStatus, 1000);
 });
