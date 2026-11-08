@@ -199,6 +199,18 @@ impl DeviceDriver for AdalightDriver {
         let _ = port.flush();
         Ok(())
     }
+
+    fn blank_leds(&mut self) -> Result<(), DeviceError> {
+        self.blank_leds()
+    }
+
+    fn set_color_order(&mut self, order: &str) {
+        self.set_color_order(order);
+    }
+
+    fn set_led_count(&mut self, count: usize) {
+        self.set_led_count(count);
+    }
 }
 
 impl Drop for AdalightDriver {

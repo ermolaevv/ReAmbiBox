@@ -35,5 +35,16 @@ pub trait DeviceDriver: Send {
 
     /// Отправка очередного кадра цветов
     fn send_frame(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError>;
+
+    /// Принудительное гашение всех светодиодов (отправка чёрного кадра)
+    fn blank_leds(&mut self) -> Result<(), DeviceError> {
+        Ok(())
+    }
+
+    /// Установка порядка цветов (например, "RGB", "GRB")
+    fn set_color_order(&mut self, _order: &str) {}
+
+    /// Установка актуального количества светодиодов
+    fn set_led_count(&mut self, _count: usize) {}
 }
 

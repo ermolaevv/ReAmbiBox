@@ -210,24 +210,62 @@
         </header>
         <div class="card settings-card">
           <div class="setting-row">
-            <label>Последовательный порт (COM):</label>
-            <div style="display:flex; gap:10px; flex:1;">
-              <select id="select-port" style="flex:1;">
-                <option value="COM10" selected>COM10</option>
-              </select>
-              <button id="btn-reconnect-port" class="btn btn-secondary" style="white-space:nowrap; padding:6px 14px; font-size:13px;" title="Аппаратный DTR сброс контроллера и очистка буфера">Сброс / Переподключение</button>
-            </div>
-          </div>
-          <div class="setting-row">
-            <label>Скорость передачи (Baud):</label>
-            <select id="select-baud">
-              <option value="115200" selected>115200 (Adalight Default)</option>
-              <option value="250000">250000</option>
-              <option value="460800">460800</option>
-              <option value="500000">500000</option>
-              <option value="1000000">1000000 (FastLED Turbo)</option>
+            <label>Тип подключения / Вывод:</label>
+            <select id="select-output-type" style="flex:1;">
+              <option value="serial" selected>USB Serial (Adalight / COM-порт)</option>
+              <option value="wled">Wi-Fi Сеть (WLED / ESP32 / DDP)</option>
             </select>
           </div>
+
+          <!-- Настройки COM-порта (Adalight) -->
+          <div id="group-serial-settings">
+            <div class="setting-row">
+              <label>Последовательный порт (COM):</label>
+              <div style="display:flex; gap:10px; flex:1;">
+                <select id="select-port" style="flex:1;">
+                  <option value="COM10" selected>COM10</option>
+                </select>
+                <button id="btn-reconnect-port" class="btn btn-secondary" style="white-space:nowrap; padding:6px 14px; font-size:13px;" title="Аппаратный DTR сброс контроллера и очистка буфера">Сброс / Переподключение</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label>Скорость передачи (Baud):</label>
+              <select id="select-baud">
+                <option value="115200" selected>115200 (Adalight Default)</option>
+                <option value="250000">250000</option>
+                <option value="460800">460800</option>
+                <option value="500000">500000</option>
+                <option value="1000000">1000000 (FastLED Turbo)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Настройки WLED по сети (Wi-Fi / UDP) -->
+          <div id="group-wled-settings" style="display:none;">
+            <div class="setting-row">
+              <label>IP-адрес WLED контроллера:</label>
+              <input type="text" id="input-wled-host" placeholder="192.168.1.100" style="flex:1; padding:7px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1e1e24; color:#fff; font-family:monospace;">
+            </div>
+            <div class="setting-row">
+              <label>UDP порт:</label>
+              <input type="number" id="input-wled-port" value="4048" min="1" max="65535" style="width:120px; padding:7px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1e1e24; color:#fff;">
+            </div>
+            <div class="setting-row">
+              <label>Сетевой протокол:</label>
+              <select id="select-wled-protocol" style="flex:1;">
+                <option value="ddp" selected>DDP (Distributed Display Protocol — рекомендуется)</option>
+                <option value="warls">WARLS (Realtime UDP)</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>Проверка связи:</label>
+              <div style="display:flex; align-items:center; gap:10px; flex:1;">
+                <button id="btn-test-wled" class="btn btn-secondary" style="padding:6px 14px; font-size:13px;">Тестовый кадр (Blink)</button>
+                <span id="wled-test-status" style="font-size:12px; color:var(--text-muted);"></span>
+              </div>
+            </div>
+          </div>
+
           <div class="setting-row">
             <label>Целевая частота (FPS):</label>
             <div style="display:flex; align-items:center; gap:12px; flex:1;">

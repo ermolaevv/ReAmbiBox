@@ -38,6 +38,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const selectPort = document.getElementById('select-port');
   const btnReconnectPort = document.getElementById('btn-reconnect-port');
 
+  const selectOutputType = document.getElementById('select-output-type');
+  const groupSerialSettings = document.getElementById('group-serial-settings');
+  const groupWledSettings = document.getElementById('group-wled-settings');
+  const inputWledHost = document.getElementById('input-wled-host');
+  const inputWledPort = document.getElementById('input-wled-port');
+  const selectWledProtocol = document.getElementById('select-wled-protocol');
+  const btnTestWled = document.getElementById('btn-test-wled');
+  const wledTestStatus = document.getElementById('wled-test-status');
+
   const btnToggleOverlay = document.getElementById('btn-toggle-overlay');
   const btnOpenWizard = document.getElementById('btn-open-wizard');
   const btnCloseWizard = document.getElementById('btn-close-wizard');
@@ -143,6 +152,68 @@ document.addEventListener('DOMContentLoaded', () => {
       btnReconnectPort.textContent = 'Сброс / Переподключение';
       btnReconnectPort.disabled = false;
     }, 1500);
+  });
+
+  // Переключение типа вывода (USB Serial vs WLED Wi-Fi)
+  function updateOutputTypeVisibility(type) {
+    const isWled = type === 'wled';
+    if (groupSerialSettings) groupSerialSettings.style.display = isWled ? 'none' : 'block';
+    if (groupWledSettings) groupWledSettings.style.display = isWled ? 'block' : 'none';
+  }
+
+  selectOutputType?.addEventListener('change', (e) => {
+    const val = e.target.value;
+    updateOutputTypeVisibility(val);
+    queueConfigUpdate({ output_type: val, reconnect: true });
+  });
+
+  inputWledHost?.addEventListener('change', (e) => {
+    const host = e.target.value.trim();
+    if (host) {
+      queueConfigUpdate({ wled_host: host, reconnect: true });
+    }
+  });
+
+  inputWledPort?.addEventListener('change', (e) => {
+    const port = parseInt(e.target.value);
+    if (!isNaN(port) && port > 0) {
+      queueConfigUpdate({ wled_port: port, reconnect: true });
+    }
+  });
+
+  selectWledProtocol?.addEventListener('change', (e) => {
+    queueConfigUpdate({ wled_protocol: e.target.value, reconnect: true });
+  });
+
+  btnTestWled?.addEventListener('click', async () => {
+    if (!btnTestWled || btnTestWled.disabled) return;
+    btnTestWled.disabled = true;
+    btnTestWled.textContent = 'Отправка...';
+    if (wledTestStatus) {
+      wledTestStatus.textContent = '';
+      wledTestStatus.style.color = 'var(--text-muted)';
+    }
+
+    try {
+      const res = await fetch('/api/wled/test', { method: 'POST' });
+      const data = await res.json();
+      if (wledTestStatus) {
+        wledTestStatus.textContent = data.message || 'Готово';
+        wledTestStatus.style.color = data.status === 'ok' ? '#4ade80' : '#f87171';
+      }
+    } catch (err) {
+      if (wledTestStatus) {
+        wledTestStatus.textContent = 'Ошибка связи с бэкендом';
+        wledTestStatus.style.color = '#f87171';
+      }
+    } finally {
+      setTimeout(() => {
+        if (btnTestWled) {
+          btnTestWled.disabled = false;
+          btnTestWled.textContent = 'Тестовый кадр (Blink)';
+        }
+      }, 1000);
+    }
   });
 
   // Переключение режимов
@@ -475,7 +546,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Обновляем статус в сайдбаре
       if (systemStatus) {
-        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} | Экран: ${data.capture_fps.toFixed(0)} FPS | Порт: ${data.serial_fps.toFixed(0)} FPS`;
+        const outLabel = data.output_type === 'wled' ? 'WLED' : 'Порт';
+        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} | Экран: ${data.capture_fps.toFixed(0)} FPS | ${outLabel}: ${data.serial_fps.toFixed(0)} FPS`;
       }
 
       updatePowerButton(data.is_active);
@@ -541,6 +613,21 @@ document.addEventListener('DOMContentLoaded', () => {
         // Заполняем порядок цветов
         if (selectColorOrder && data.color_order) {
           selectColorOrder.value = data.color_order;
+        }
+
+        // Заполняем настройки типа вывода и WLED
+        if (selectOutputType && data.output_type) {
+          selectOutputType.value = data.output_type;
+          updateOutputTypeVisibility(data.output_type);
+        }
+        if (inputWledHost && data.wled_host) {
+          inputWledHost.value = data.wled_host;
+        }
+        if (inputWledPort && data.wled_port) {
+          inputWledPort.value = data.wled_port;
+        }
+        if (selectWledProtocol && data.wled_protocol) {
+          selectWledProtocol.value = data.wled_protocol;
         }
 
         // Заполняем настройки светомузыки

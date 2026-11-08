@@ -12,6 +12,7 @@ use reambibox_core::capture::dxgi::DxgiCapture;
 use reambibox_core::color::smoothing::TemporalSmoother;
 use reambibox_core::config::{AppConfig, HotkeysConfig};
 use reambibox_core::device::adalight::AdalightDriver;
+use reambibox_core::device::wled::{WledDriver, WledProtocol};
 use reambibox_core::device::traits::DeviceDriver;
 use reambibox_core::device::types::{DeviceFrame, RgbColor};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,10 @@ struct ConfigUpdate {
     reconnect: Option<bool>,
     audio_effect: Option<String>,
     audio_sensitivity: Option<f32>,
+    output_type: Option<String>,
+    wled_host: Option<String>,
+    wled_port: Option<u16>,
+    wled_protocol: Option<String>,
     hotkeys: Option<HotkeysConfig>,
 }
 
@@ -69,6 +74,10 @@ struct ApiStatusResponse {
     static_color: [u8; 3],
     audio_effect: String,
     audio_sensitivity: f32,
+    output_type: String,
+    wled_host: String,
+    wled_port: u16,
+    wled_protocol: String,
     selected_monitor: usize,
     monitors: Vec<ApiMonitorInfo>,
     led_count: usize,
@@ -92,13 +101,15 @@ unsafe fn init_console_support() {
     }
 }
 
-unsafe fn setup_shutdown_handlers(port: String, baud: u32, leds: usize) {
+unsafe fn setup_shutdown_handlers(port: String, baud: u32, wled_host: String, wled_port: u16, leds: usize) {
     // 1. Аварийный хук паники
     let panic_port = port.clone();
+    let panic_wled_host = wled_host.clone();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         eprintln!("[Emergency] Аварийная остановка! Экстренное гашение светодиодов...");
         AdalightDriver::emergency_blank(&panic_port, baud, leds);
+        WledDriver::emergency_blank(&panic_wled_host, wled_port, leds);
         default_hook(info);
     }));
 
@@ -107,6 +118,7 @@ unsafe fn setup_shutdown_handlers(port: String, baud: u32, leds: usize) {
         println!("[Завершение] Получен системный сигнал {} — гасим подсветку", dw_ctrl_type);
         let cfg = AppConfig::load();
         AdalightDriver::emergency_blank(&cfg.serial_port, cfg.baud_rate, cfg.zones.len());
+        WledDriver::emergency_blank(&cfg.wled_host, cfg.wled_port, cfg.zones.len());
         windows::Win32::Foundation::BOOL(0)
     }
 
@@ -147,7 +159,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Установка обработчиков экстренного выключения подсветки
     unsafe {
-        setup_shutdown_handlers(initial_cfg.serial_port.clone(), initial_cfg.baud_rate, initial_cfg.zones.len());
+        setup_shutdown_handlers(
+            initial_cfg.serial_port.clone(),
+            initial_cfg.baud_rate,
+            initial_cfg.wled_host.clone(),
+            initial_cfg.wled_port,
+            initial_cfg.zones.len(),
+        );
     }
 
     let shared_config = Arc::new(parking_lot::RwLock::new(initial_cfg.clone()));
@@ -188,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     println!(">>> [OK] Lightpack API сервер активен на 127.0.0.1:3636");
 
-    // 4. Выделенный независимый аппаратный поток вывода в COM-порт (Adalight)
+    // 4. Выделенный независимый аппаратный поток вывода (Adalight COM-порт / WLED Wi-Fi)
     {
         let colors_ref = Arc::clone(&output_colors);
         let status_ref = Arc::clone(&serial_status);
@@ -198,14 +216,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let reconnect_ref = Arc::clone(&needs_reconnect);
 
         std::thread::spawn(move || {
-            let (mut port_name, mut baud_rate, mut color_order) = {
+            let mut current_cfg = {
                 let cfg = cfg_ref.read();
-                (cfg.serial_port.clone(), cfg.baud_rate, cfg.color_order.clone())
+                cfg.clone()
             };
 
-            let mut driver = AdalightDriver::new(&port_name, baud_rate);
-            driver.set_color_order(&color_order);
+            fn create_driver(cfg: &AppConfig) -> Box<dyn DeviceDriver> {
+                if cfg.output_type.to_lowercase() == "wled" {
+                    let proto = WledProtocol::from_str_loose(&cfg.wled_protocol);
+                    let mut d = WledDriver::new(&cfg.wled_host, cfg.wled_port, proto);
+                    d.set_color_order(&cfg.color_order);
+                    d.set_led_count(cfg.zones.len());
+                    Box::new(d)
+                } else {
+                    let mut d = AdalightDriver::new(&cfg.serial_port, cfg.baud_rate);
+                    d.set_color_order(&cfg.color_order);
+                    d.set_led_count(cfg.zones.len());
+                    Box::new(d)
+                }
+            }
 
+            let mut driver = create_driver(&current_cfg);
             let mut last_reconnect = Instant::now() - Duration::from_secs(5);
             let mut sent_frames: u64 = 0;
             let mut last_fps_time = Instant::now();
@@ -214,52 +245,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let start = Instant::now();
 
                 // Обработка ручного запроса переподключения/сброса контроллера
-                if reconnect_ref.swap(false, Ordering::Relaxed) {
-                    println!("[Serial] Запрошен принудительный сброс и переподключение COM-порта...");
+                let force_recon = reconnect_ref.swap(false, Ordering::Relaxed);
+
+                // Периодическая проверка смены конфигурации
+                let (should_recreate, target_fps, led_count, baud, is_wled) = {
+                    let cfg = cfg_ref.read();
+                    let is_wled = cfg.output_type.to_lowercase() == "wled";
+                    let hardware_changed = cfg.output_type != current_cfg.output_type
+                        || cfg.serial_port != current_cfg.serial_port
+                        || cfg.baud_rate != current_cfg.baud_rate
+                        || cfg.wled_host != current_cfg.wled_host
+                        || cfg.wled_port != current_cfg.wled_port
+                        || cfg.wled_protocol != current_cfg.wled_protocol
+                        || cfg.color_order != current_cfg.color_order;
+
+                    let needs_new_driver = hardware_changed || force_recon;
+                    if needs_new_driver {
+                        current_cfg = cfg.clone();
+                    }
+                    (needs_new_driver, cfg.target_fps, cfg.zones.len(), cfg.baud_rate, is_wled)
+                };
+
+                if should_recreate {
+                    println!("[Output] Переинициализация драйвера вывода...");
                     let _ = driver.disconnect();
+                    driver = create_driver(&current_cfg);
                     last_reconnect = Instant::now() - Duration::from_secs(5);
                 }
 
-                // Периодическая проверка смены настроек порта / скорости / порядка цветов
-                let (target_fps, led_count, baud) = {
-                    let cfg = cfg_ref.read();
-                    if cfg.serial_port != port_name || cfg.baud_rate != baud_rate {
-                        port_name = cfg.serial_port.clone();
-                        baud_rate = cfg.baud_rate;
-                        let _ = driver.disconnect();
-                        driver = AdalightDriver::new(&port_name, baud_rate);
-                    }
-                    if cfg.color_order != color_order {
-                        color_order = cfg.color_order.clone();
-                        driver.set_color_order(&color_order);
-                    }
-                    (cfg.target_fps, cfg.zones.len(), cfg.baud_rate)
-                };
-
-                // Защита микроконтроллера от переполнения UART буфера:
-                // Время физической передачи пакета (10 бит на байт: 1 старт + 8 данных + 1 стоп)
-                let packet_bytes = (6 + led_count * 3) as u64;
-                let tx_time_ms = (packet_bytes * 10 * 1000) / (baud.max(9600) as u64);
-                // Микроконтроллеру требуется минимум 6-8 мс тишины между кадрами для вызова FastLED.show()
-                let min_safe_interval_ms = tx_time_ms + 7;
-                let requested_interval_ms = if target_fps > 0 {
-                    1000 / (target_fps as u64)
+                // Расчет интервала между кадрами
+                let frame_interval = if is_wled {
+                    let ms = if target_fps > 0 { 1000 / (target_fps as u64) } else { 33 };
+                    Duration::from_millis(ms.max(10))
                 } else {
-                    40
+                    // Защита микроконтроллера от переполнения UART буфера:
+                    let packet_bytes = (6 + led_count * 3) as u64;
+                    let tx_time_ms = (packet_bytes * 10 * 1000) / (baud.max(9600) as u64);
+                    let min_safe_interval_ms = tx_time_ms + 7;
+                    let requested_interval_ms = if target_fps > 0 {
+                        1000 / (target_fps as u64)
+                    } else {
+                        40
+                    };
+                    Duration::from_millis(requested_interval_ms.max(min_safe_interval_ms))
                 };
-                let frame_interval = Duration::from_millis(requested_interval_ms.max(min_safe_interval_ms));
 
-                // Автопереподключение к порту при необходимости
+                // Автопереподключение к порту / сокету при необходимости
                 if !driver.is_connected() {
                     if last_reconnect.elapsed() >= Duration::from_millis(1500) {
                         last_reconnect = Instant::now();
                         match driver.connect() {
                             Ok(_) => {
-                                println!(">>> [OK] Успешно подключено к Adalight на порту {} (порядок: {})", port_name, color_order);
-                                *status_ref.write() = format!("Подключено ({})", port_name);
+                                println!(">>> [OK] Успешно подключено к {}", driver.name());
+                                let st = if is_wled {
+                                    format!("WLED ({}:{})", current_cfg.wled_host, current_cfg.wled_port)
+                                } else {
+                                    format!("Подключено ({})", current_cfg.serial_port)
+                                };
+                                *status_ref.write() = st;
                             }
                             Err(e) => {
-                                *status_ref.write() = format!("Ожидание порта {} ({})", port_name, e);
+                                let st = if is_wled {
+                                    format!("WLED ({}:{}) недоступен ({})", current_cfg.wled_host, current_cfg.wled_port, e)
+                                } else {
+                                    format!("Ожидание порта {} ({})", current_cfg.serial_port, e)
+                                };
+                                *status_ref.write() = st;
                             }
                         }
                     }
@@ -277,14 +328,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             sent_frames += 1;
                         }
                         Err(e) => {
-                            eprintln!("[Serial] Ошибка записи в {}: {}", port_name, e);
+                            eprintln!("[Output] Ошибка записи в {}: {}", driver.name(), e);
                             *status_ref.write() = format!("Ошибка: {}", e);
-                            // send_frame автоматически сбрасывает порт в None при обрыве
                         }
                     }
                 }
 
-                // Подсчет реального Serial FPS
+                // Подсчет реального Output FPS
                 if last_fps_time.elapsed() >= Duration::from_secs(1) {
                     let fps = (sent_frames as f64) / last_fps_time.elapsed().as_secs_f64();
                     *fps_ref.write() = fps as f32;
@@ -599,6 +649,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         static_color: cfg.static_color,
                         audio_effect: cfg.audio_effect.clone(),
                         audio_sensitivity: cfg.audio_sensitivity,
+                        output_type: cfg.output_type.clone(),
+                        wled_host: cfg.wled_host.clone(),
+                        wled_port: cfg.wled_port,
+                        wled_protocol: cfg.wled_protocol.clone(),
                         selected_monitor: cfg.selected_monitor,
                         monitors,
                         led_count: cfg.zones.len(),
@@ -735,6 +789,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 cfg.serial_port = port;
                                 recon_ref.store(true, Ordering::Relaxed);
                             }
+                            if let Some(ot) = update.output_type {
+                                println!("[API] Смена типа вывода: {}", ot);
+                                cfg.output_type = ot;
+                                recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(wh) = update.wled_host {
+                                println!("[API] Смена WLED хоста: {}", wh);
+                                cfg.wled_host = wh;
+                                recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(wp) = update.wled_port {
+                                println!("[API] Смена WLED порта: {}", wp);
+                                cfg.wled_port = wp;
+                                recon_ref.store(true, Ordering::Relaxed);
+                            }
+                            if let Some(wpr) = update.wled_protocol {
+                                println!("[API] Смена WLED протокола: {}", wpr);
+                                cfg.wled_protocol = wpr;
+                                recon_ref.store(true, Ordering::Relaxed);
+                            }
                             if let Some(true) = update.reconnect {
                                 println!("[API] Запрос принудительного аппаратного сброса/переподключения контроллера");
                                 recon_ref.store(true, Ordering::Relaxed);
@@ -750,6 +824,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // API: POST /api/wled/test
+                if req_text.starts_with("POST /api/wled/test") {
+                    let cfg = config_ref.read().clone();
+                    let host = cfg.wled_host.clone();
+                    let port = cfg.wled_port;
+                    let proto = WledProtocol::from_str_loose(&cfg.wled_protocol);
+                    let mut test_driver = WledDriver::new(&host, port, proto);
+                    test_driver.set_color_order(&cfg.color_order);
+                    let (res_status, res_msg) = match test_driver.connect() {
+                        Ok(_) => {
+                            let frame = DeviceFrame::new(vec![RgbColor::new(0, 255, 0); cfg.zones.len().max(10)]);
+                            let _ = test_driver.send_frame(&frame);
+                            std::thread::sleep(Duration::from_millis(300));
+                            let _ = test_driver.blank_leds();
+                            ("ok", "Тестовый кадр (зеленый) отправлен на контроллер WLED")
+                        }
+                        Err(e) => {
+                            eprintln!("[API] Ошибка теста WLED: {}", e);
+                            ("error", "Не удалось отправить сетевой UDP пакет на WLED")
+                        }
+                    };
+                    let json = format!("{{\"status\":\"{}\",\"message\":\"{}\"}}", res_status, res_msg);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        json.len(),
+                        json
+                    );
                     let _ = stream.write_all(response.as_bytes()).await;
                     return;
                 }
@@ -819,6 +924,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[Выход] Приложение ReAmbiBox завершает работу...");
     let cfg = shared_config.read().clone();
     AdalightDriver::emergency_blank(&cfg.serial_port, cfg.baud_rate, cfg.zones.len());
+    WledDriver::emergency_blank(&cfg.wled_host, cfg.wled_port, cfg.zones.len());
 
     Ok(())
 }

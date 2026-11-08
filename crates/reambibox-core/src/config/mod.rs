@@ -28,6 +28,14 @@ pub struct AppConfig {
     pub audio_effect: String,
     #[serde(default = "default_audio_sensitivity")]
     pub audio_sensitivity: f32,
+    #[serde(default = "default_output_type")]
+    pub output_type: String,
+    #[serde(default = "default_wled_host")]
+    pub wled_host: String,
+    #[serde(default = "default_wled_port")]
+    pub wled_port: u16,
+    #[serde(default = "default_wled_protocol")]
+    pub wled_protocol: String,
     #[serde(default)]
     pub hotkeys: HotkeysConfig,
     pub zones: Vec<Zone>,
@@ -103,6 +111,22 @@ fn default_audio_sensitivity() -> f32 {
     1.0
 }
 
+fn default_output_type() -> String {
+    "serial".to_string()
+}
+
+fn default_wled_host() -> String {
+    "192.168.1.100".to_string()
+}
+
+fn default_wled_port() -> u16 {
+    4048
+}
+
+fn default_wled_protocol() -> String {
+    "ddp".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         let led_count = 60;
@@ -123,6 +147,10 @@ impl Default for AppConfig {
             static_color: default_static_color(),
             audio_effect: default_audio_effect(),
             audio_sensitivity: default_audio_sensitivity(),
+            output_type: default_output_type(),
+            wled_host: default_wled_host(),
+            wled_port: default_wled_port(),
+            wled_protocol: default_wled_protocol(),
             hotkeys: HotkeysConfig::default(),
             zones,
         }
