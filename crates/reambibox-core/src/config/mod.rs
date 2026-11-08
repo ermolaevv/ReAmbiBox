@@ -1,2 +1,72 @@
-// Config module
+pub mod wizard;
 
+use crate::color::zone::Zone;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub selected_monitor: usize,
+    pub serial_port: String,
+    pub baud_rate: u32,
+    pub led_count: usize,
+    pub brightness: f32,
+    pub smoothing: f32,
+    pub gamma: f32,
+    pub letterbox_detection: bool,
+    pub target_fps: u32,
+    pub zones: Vec<Zone>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        let led_count = 60;
+        let zones = wizard::ZoneWizard::generate_perimeter(20, 20, 10, 10);
+        Self {
+            selected_monitor: 0,
+            serial_port: "COM10".to_string(),
+            baud_rate: 115200,
+            led_count,
+            brightness: 1.0,
+            smoothing: 0.5,
+            gamma: 2.2,
+            letterbox_detection: true,
+            target_fps: 60,
+            zones,
+        }
+    }
+}
+
+impl AppConfig {
+    pub fn config_path() -> PathBuf {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        let mut path = PathBuf::from(appdata);
+        path.push("ReAmbiBox");
+        path.push("config.json");
+        path
+    }
+
+    pub fn load() -> Self {
+        let path = Self::config_path();
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(cfg) = serde_json::from_str(&content) {
+                    return cfg;
+                }
+            }
+        }
+        let default = Self::default();
+        let _ = default.save();
+        default
+    }
+
+    pub fn save(&self) -> Result<(), std::io::Error> {
+        let path = Self::config_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        fs::write(path, json)
+    }
+}

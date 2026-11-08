@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReAmbiBox Control Center</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Боковая панель -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon"></div>
+        <h2>ReAmbiBox</h2>
+      </div>
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">Панель управления</button>
+        <button class="nav-item" data-tab="zones">Редактор зон</button>
+        <button class="nav-item" data-tab="hardware">Оборудование</button>
+        <button class="nav-item" data-tab="api">Lightpack API</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="status-indicator">
+          <span class="dot active"></span>
+          <span id="system-status">Активен (COM10)</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Основной контент -->
+    <main class="main-content">
+      <!-- Вкладка: Панель управления -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <header class="content-header">
+          <h1>Управление подсветкой</h1>
+          <button id="toggle-power" class="btn btn-primary">Выключить подсветку</button>
+        </header>
+
+        <div class="cards-grid">
+          <div class="card">
+            <h3>Яркость подсветки</h3>
+            <div class="slider-control">
+              <input type="range" id="slider-brightness" min="0" max="100" value="100">
+              <span id="val-brightness">100%</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Временное сглаживание</h3>
+            <div class="slider-control">
+              <input type="range" id="slider-smoothing" min="0" max="95" value="50">
+              <span id="val-smoothing">0.50</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Гамма-коррекция</h3>
+            <div class="slider-control">
+              <input type="range" id="slider-gamma" min="10" max="30" value="22">
+              <span id="val-gamma">2.2</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Детекция черных полос (21:9)</h3>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-letterbox" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Вкладка: Редактор зон -->
+      <section id="tab-zones" class="tab-pane">
+        <header class="content-header">
+          <h1>Редактор зон экрана</h1>
+          <div class="header-actions">
+            <button id="btn-wizard" class="btn btn-secondary">Мастер периметра (60 LED)</button>
+            <button id="btn-save-zones" class="btn btn-primary">Сохранить зоны</button>
+          </div>
+        </header>
+
+        <div class="zone-editor-container">
+          <div class="monitor-frame" id="monitor-canvas">
+            <!-- Зоны отрисовываются здесь динамически -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Вкладка: Оборудование -->
+      <section id="tab-hardware" class="tab-pane">
+        <header class="content-header">
+          <h1>Настройки оборудования</h1>
+        </header>
+        <div class="card settings-card">
+          <div class="setting-row">
+            <label>Последовательный порт (COM):</label>
+            <select id="select-port">
+              <option value="COM10" selected>COM10 (Текущий)</option>
+              <option value="COM9">COM9</option>
+              <option value="COM6">COM6</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Скорость передачи (Baud):</label>
+            <select id="select-baud">
+              <option value="115200" selected>115200 (Adalight Default)</option>
+              <option value="256000">256000</option>
+              <option value="500000">500000</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Монитор для захвата:</label>
+            <select id="select-monitor">
+              <option value="0" selected>DISPLAY2 (2560x1440) [Primary]</option>
+              <option value="1">DISPLAY1 (2560x1600)</option>
+              <option value="2">DISPLAY3 (2560x1440)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Вкладка: Lightpack API -->
+      <section id="tab-api" class="tab-pane">
+        <header class="content-header">
+          <h1>Lightpack Совместимость</h1>
+        </header>
+        <div class="card">
+          <p>Встроенный сервер слушает порт <code>127.0.0.1:3636</code>.</p>
+          <p>Поддерживает плагины Kodi, Prismatik, Home Assistant и Python-скрипты AmbiBox.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
