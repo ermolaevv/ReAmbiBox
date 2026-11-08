@@ -174,7 +174,9 @@ impl DeviceDriver for AdalightDriver {
         std::thread::sleep(Duration::from_millis(50));
         let _ = port.write_data_terminal_ready(true);
         let _ = port.write_request_to_send(true);
-        std::thread::sleep(Duration::from_millis(150));
+        // Загрузчику Arduino Optiboot / Caterina требуется около 1.0–1.2 сек после DTR-сброса,
+        // чтобы завершить ожидание прошивки и запустить основной скетч ленты.
+        std::thread::sleep(Duration::from_millis(1200));
         let _ = port.clear(serialport::ClearBuffer::All);
 
         self.port = Some(port);
@@ -210,7 +212,12 @@ impl DeviceDriver for AdalightDriver {
             return Err(DeviceError::IoError(e));
         }
 
-        let _ = port.flush();
+        if let Err(e) = port.flush() {
+            error!("Ошибка сброса буфера (flush) в порт {}: {}", self.port_name, e);
+            self.port = None; // Сбрасываем зависший порт
+            return Err(DeviceError::IoError(e));
+        }
+
         Ok(())
     }
 

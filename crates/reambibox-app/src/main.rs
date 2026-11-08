@@ -325,7 +325,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Защита микроконтроллера от переполнения UART буфера:
                     let packet_bytes = (6 + led_count * 3) as u64;
                     let tx_time_ms = (packet_bytes * 10 * 1000) / (baud.max(9600) as u64);
-                    let min_safe_interval_ms = tx_time_ms + 7;
+                    // WS2812B требует времени на отрисовку (~30 мкс на диод при выключенных прерываниях)
+                    // плюс гарантированная межкадровая пауза для возврата в ожидание префикса 'Ada'
+                    let ws2812_show_ms = ((led_count as u64 * 30) / 1000) + 5;
+                    let min_safe_interval_ms = tx_time_ms + ws2812_show_ms;
                     let requested_interval_ms = if target_fps > 0 {
                         1000 / (target_fps as u64)
                     } else {
@@ -389,6 +392,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let elapsed = start.elapsed();
                 if elapsed < frame_interval {
                     std::thread::sleep(frame_interval - elapsed);
+                } else if !is_wled {
+                    // Гарантированная межкадровая пауза тишины (inter-frame gap) не менее 3 мс,
+                    // чтобы микроконтроллер не получал пакеты внахлёст при выключенных прерываниях
+                    std::thread::sleep(Duration::from_millis(3));
                 }
             }
 
