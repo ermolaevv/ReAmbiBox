@@ -2,6 +2,7 @@
 
 mod autostart;
 mod tray;
+mod zone_overlay;
 
 use reambibox_core::api::lightpack::LightpackServer;
 use reambibox_core::api::state::create_shared_state;
@@ -67,6 +68,7 @@ struct ApiStatusResponse {
     serial_port: String,
     serial_status: String,
     available_ports: Vec<String>,
+    is_overlay_visible: bool,
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
@@ -146,12 +148,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_running = Arc::new(AtomicBool::new(true));
     let needs_reconnect = Arc::new(AtomicBool::new(false));
 
-    // 2. Инициализация системного трея и мониторинга питания Windows
+    // 2. Инициализация экранного оверлея калибровки зон (AmbiBox Overlay)
+    let overlay_manager = Arc::new(zone_overlay::ZoneOverlayManager::new());
+    overlay_manager.run_overlay_thread(Arc::clone(&shared_config));
+
+    // 3. Инициализация системного трея и мониторинга питания Windows
     let tray_manager = Arc::new(TrayManager::new());
-    tray_manager.run_tray_thread(Arc::clone(&shared_config), Arc::clone(&is_running));
+    tray_manager.run_tray_thread(
+        Arc::clone(&shared_config),
+        Arc::clone(&is_running),
+        Arc::clone(&overlay_manager),
+    );
     println!(">>> [OK] Системный трей Windows и мониторинг событий питания активны.");
 
-    // 3. Запуск Lightpack API сервера (порт 3636)
+    // 4. Запуск Lightpack API сервера (порт 3636)
     let lp_server = LightpackServer::new(shared_state.clone(), LightpackServer::DEFAULT_PORT);
     tokio::spawn(async move {
         let _ = lp_server.run().await;
@@ -424,6 +434,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let web_serial_fps = Arc::clone(&serial_fps);
     let web_capture_fps = Arc::clone(&capture_fps);
     let web_reconnect = Arc::clone(&needs_reconnect);
+    let web_overlay = Arc::clone(&overlay_manager);
 
     tokio::spawn(async move {
         let listener = match TcpListener::bind("127.0.0.1:3637").await {
@@ -441,6 +452,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let s_fps_ref = Arc::clone(&web_serial_fps);
             let c_fps_ref = Arc::clone(&web_capture_fps);
             let recon_ref = Arc::clone(&web_reconnect);
+            let overlay_ref = Arc::clone(&web_overlay);
 
             tokio::spawn(async move {
                 let mut req_bytes = Vec::new();
@@ -531,6 +543,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         serial_port: cfg.serial_port.clone(),
                         serial_status: port_status,
                         available_ports: AdalightDriver::available_ports(),
+                        is_overlay_visible: overlay_ref.is_visible(),
                         zones: cfg.zones.clone(),
                     };
 
@@ -540,6 +553,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         json.len(),
                         json
                     );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // API: POST /api/overlay/toggle
+                if req_text.starts_with("POST /api/overlay/toggle") {
+                    overlay_ref.toggle();
+                    let is_vis = overlay_ref.is_visible();
+                    let res = format!("{{\"status\":\"ok\",\"is_visible\":{}}}", is_vis);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        res.len(),
+                        res
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+
+                // API: POST /api/zones/wizard
+                if req_text.starts_with("POST /api/zones/wizard") {
+                    if let Some(pos) = req_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let body_slice = &req_bytes[pos + 4..];
+                        if let Ok(params) = serde_json::from_slice::<reambibox_core::config::wizard::PerimeterParams>(body_slice) {
+                            let new_zones = reambibox_core::config::wizard::ZoneWizard::generate_custom_perimeter(&params);
+                            let count = new_zones.len();
+                            {
+                                let mut cfg = config_ref.write();
+                                cfg.zones = new_zones;
+                                cfg.led_count = count;
+                                let _ = cfg.save();
+                            }
+                            if let Ok(mut st) = state_ref.try_write() {
+                                st.led_count = count;
+                            }
+                            println!("[API] Мастер периметра зон применен: сгенерировано {} зон", count);
+                        }
+                    }
+
+                    let response = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}";
                     let _ = stream.write_all(response.as_bytes()).await;
                     return;
                 }

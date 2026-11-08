@@ -28,6 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // Константы оконных сообщений и идентификаторов меню
 const WM_TRAYICON: u32 = WM_USER + 101;
 const ID_MENU_TOGGLE: usize = 2001;
+const ID_MENU_OVERLAY: usize = 2005;
 const ID_MENU_WEBUI: usize = 2002;
 const ID_MENU_AUTOSTART: usize = 2003;
 const ID_MENU_EXIT: usize = 2004;
@@ -43,6 +44,7 @@ struct TrayContext {
     is_running: Arc<AtomicBool>,
     is_display_on: Arc<AtomicBool>,
     is_session_unlocked: Arc<AtomicBool>,
+    overlay_manager: Arc<crate::zone_overlay::ZoneOverlayManager>,
     h_power_notify: Option<HPOWERNOTIFY>,
     hwnd: HWND,
 }
@@ -73,6 +75,7 @@ impl TrayManager {
         &self,
         config: Arc<RwLock<AppConfig>>,
         is_running: Arc<AtomicBool>,
+        overlay_manager: Arc<crate::zone_overlay::ZoneOverlayManager>,
     ) {
         let display_on_ref = Arc::clone(&self.is_display_on);
         let session_unlocked_ref = Arc::clone(&self.is_session_unlocked);
@@ -145,6 +148,7 @@ impl TrayManager {
                 is_running: Arc::clone(&is_running),
                 is_display_on: display_on_ref,
                 is_session_unlocked: session_unlocked_ref,
+                overlay_manager,
                 h_power_notify: h_power,
                 hwnd,
             });
@@ -284,6 +288,7 @@ unsafe fn show_context_menu(hwnd: HWND) {
     let autostart_flags = if is_autostart { MF_CHECKED } else { MF_UNCHECKED } | MF_STRING;
 
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_TOGGLE, toggle_text);
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, w!("Показать зоны на экране (Калибровка)"));
     let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, w!("Открыть панель управления (Web UI)..."));
     let _ = AppendMenuW(menu, autostart_flags, ID_MENU_AUTOSTART, w!("Запуск вместе с Windows"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -312,6 +317,11 @@ unsafe fn handle_menu_command(cmd_id: usize) {
                 cfg.is_active = !cfg.is_active;
                 let _ = cfg.save();
                 println!("[Трей] Подсветка переключена: {}", if cfg.is_active { "ВКЛ" } else { "ВЫКЛ" });
+            }
+        }
+        ID_MENU_OVERLAY => {
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                ctx.overlay_manager.toggle();
             }
         }
         ID_MENU_WEBUI => {

@@ -33,6 +33,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const selectPort = document.getElementById('select-port');
   const btnReconnectPort = document.getElementById('btn-reconnect-port');
 
+  const btnToggleOverlay = document.getElementById('btn-toggle-overlay');
+  const btnOpenWizard = document.getElementById('btn-open-wizard');
+  const btnCloseWizard = document.getElementById('btn-close-wizard');
+  const modalWizard = document.getElementById('modal-wizard');
+  const wizDepth = document.getElementById('wiz-depth');
+  const valWizDepth = document.getElementById('val-wiz-depth');
+  const btnPreset98 = document.getElementById('btn-preset-98');
+  const btnApplyWizard = document.getElementById('btn-apply-wizard');
+
   const selectMonitor = document.getElementById('select-monitor');
   const selectColorOrder = document.getElementById('select-color-order');
   const systemStatus = document.getElementById('system-status');
@@ -181,6 +190,90 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Управление оверлеем
+  btnToggleOverlay?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/overlay/toggle', { method: 'POST' });
+      const data = await res.json();
+      updateOverlayButton(data.is_visible);
+    } catch (e) {
+      console.error('Ошибка переключения оверлея:', e);
+    }
+  });
+
+  function updateOverlayButton(isVisible) {
+    if (btnToggleOverlay) {
+      if (isVisible) {
+        btnToggleOverlay.textContent = 'Скрыть зоны на экране (Оверлей)';
+        btnToggleOverlay.className = 'btn btn-primary';
+      } else {
+        btnToggleOverlay.textContent = 'Показать зоны на экране (Оверлей)';
+        btnToggleOverlay.className = 'btn btn-secondary';
+      }
+    }
+  }
+
+  // Модальное окно мастера
+  btnOpenWizard?.addEventListener('click', () => {
+    if (modalWizard) modalWizard.style.display = 'flex';
+  });
+
+  btnCloseWizard?.addEventListener('click', () => {
+    if (modalWizard) modalWizard.style.display = 'none';
+  });
+
+  wizDepth?.addEventListener('input', (e) => {
+    if (valWizDepth) valWizDepth.textContent = e.target.value + '%';
+  });
+
+  btnPreset98?.addEventListener('click', () => {
+    const elTop = document.getElementById('wiz-top');
+    const elBottom = document.getElementById('wiz-bottom');
+    const elLeft = document.getElementById('wiz-left');
+    const elRight = document.getElementById('wiz-right');
+    const elCorner = document.getElementById('wiz-corner');
+    const elDir = document.getElementById('wiz-direction');
+    const elDepth = document.getElementById('wiz-depth');
+
+    if (elTop) elTop.value = 26;
+    if (elBottom) elBottom.value = 25;
+    if (elLeft) elLeft.value = 24;
+    if (elRight) elRight.value = 23;
+    if (elCorner) elCorner.value = 'BottomLeft';
+    if (elDir) elDir.value = 'Clockwise';
+    if (elDepth) elDepth.value = 8;
+    if (valWizDepth) valWizDepth.textContent = '8%';
+  });
+
+  btnApplyWizard?.addEventListener('click', async () => {
+    const params = {
+      top_count: parseInt(document.getElementById('wiz-top')?.value) || 0,
+      bottom_count: parseInt(document.getElementById('wiz-bottom')?.value) || 0,
+      left_count: parseInt(document.getElementById('wiz-left')?.value) || 0,
+      right_count: parseInt(document.getElementById('wiz-right')?.value) || 0,
+      start_corner: document.getElementById('wiz-corner')?.value || 'BottomLeft',
+      direction: document.getElementById('wiz-direction')?.value || 'Clockwise',
+      depth: (parseInt(document.getElementById('wiz-depth')?.value) || 8) / 100.0,
+    };
+
+    try {
+      btnApplyWizard.textContent = 'Применение...';
+      btnApplyWizard.disabled = true;
+      await fetch('/api/zones/wizard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (modalWizard) modalWizard.style.display = 'none';
+      fetchStatus();
+    } catch (e) {
+      console.error('Ошибка применения мастера:', e);
+    } finally {
+      btnApplyWizard.textContent = 'Применить к экрану';
+      btnApplyWizard.disabled = false;
+    }
+  });
+
   // Отрисовка зон
   function renderZones(zones) {
     if (!canvas || !zones) return;
@@ -213,6 +306,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       updatePowerButton(data.is_active);
+      updateOverlayButton(data.is_overlay_visible);
+      renderZones(data.zones);
 
       // Синхронизируем контролы только при первой загрузке
       if (!window.__initialized) {
