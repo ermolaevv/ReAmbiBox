@@ -1,3 +1,5 @@
+use crate::capture::{AsFrameView, FrameView};
+#[cfg(test)]
 use crate::capture::CapturedFrame;
 use crate::device::types::RgbColor;
 use serde::{Deserialize, Serialize};
@@ -53,10 +55,33 @@ impl Zone {
         }
     }
 
-    /// Быстрый расчет среднего цвета RGB зоны по BGRA кадру с шагом выборки (downsampling)
-    pub fn sample_color(&self, frame: &CapturedFrame, step: u32) -> RgbColor {
+    /// Расчет среднего цвета RGB зоны с заданным фиксированным шагом выборки
+    pub fn sample_color(&self, frame: &impl AsFrameView, step: u32) -> RgbColor {
+        self.sample_color_view(&frame.as_frame_view(), Some(step))
+    }
+
+    /// Адаптивный расчет цвета зоны: оптимальная сетка точек (~144..256 замеров) для максимальной производительности
+    pub fn sample_color_adaptive(&self, frame: &impl AsFrameView) -> RgbColor {
+        self.sample_color_view(&frame.as_frame_view(), None)
+    }
+
+    /// Высокопроизводительная выборка среднего цвета зоны напрямую из FrameView
+    pub fn sample_color_view(&self, frame: &FrameView<'_>, step_override: Option<u32>) -> RgbColor {
         let (px, py, pw, ph) = self.rect.to_pixel_rect(frame.width, frame.height);
-        let step = step.max(1);
+        if pw == 0 || ph == 0 {
+            return RgbColor::BLACK;
+        }
+
+        // Адаптивный шаг выборки: для Ambilight достаточно сетки ~12x12..16x16 точек (144..256 замеров)
+        let step = match step_override {
+            Some(s) if s > 0 => s,
+            _ => {
+                let target_samples_per_axis = 16u32;
+                let step_x = (pw / target_samples_per_axis).max(1);
+                let step_y = (ph / target_samples_per_axis).max(1);
+                step_x.max(step_y).max(2)
+            }
+        };
 
         let mut sum_r: u64 = 0;
         let mut sum_g: u64 = 0;
@@ -64,7 +89,8 @@ impl Zone {
         let mut count: u64 = 0;
 
         let row_pitch = frame.row_pitch as usize;
-        let data = &frame.data;
+        let data = frame.data;
+        let data_len = data.len();
 
         let mut y = py;
         while y < py + ph {
@@ -72,11 +98,14 @@ impl Zone {
             let mut x = px;
             while x < px + pw {
                 let pixel_offset = row_offset + (x as usize) * 4;
-                if pixel_offset + 3 <= data.len() {
-                    // Формат DXGI BGRA8: data[0]=B, data[1]=G, data[2]=R
-                    let b = data[pixel_offset] as u64;
-                    let g = data[pixel_offset + 1] as u64;
-                    let r = data[pixel_offset + 2] as u64;
+                if pixel_offset + 4 <= data_len {
+                    // Быстрое 32-битное чтение пикселя (BGRA8) одной инструкцией
+                    let pixel_val = unsafe {
+                        std::ptr::read_unaligned(data.as_ptr().add(pixel_offset) as *const u32)
+                    };
+                    let b = (pixel_val & 0xFF) as u64;
+                    let g = ((pixel_val >> 8) & 0xFF) as u64;
+                    let r = ((pixel_val >> 16) & 0xFF) as u64;
 
                     sum_b += b;
                     sum_g += g;
@@ -136,6 +165,15 @@ mod tests {
         let zone = Zone::new(0, NormalizedRect::new(0.0, 0.0, 1.0, 1.0));
         let color = zone.sample_color(&frame, 2);
         assert_eq!(color, RgbColor::new(255, 0, 0));
+
+        // Проверка адаптивной выборки
+        let adaptive_color = zone.sample_color_adaptive(&frame);
+        assert_eq!(adaptive_color, RgbColor::new(255, 0, 0));
+
+        // Проверка заимствованного FrameView (Zero-Allocation)
+        let view = frame.as_view();
+        let view_color = zone.sample_color_adaptive(&view);
+        assert_eq!(view_color, RgbColor::new(255, 0, 0));
     }
 }
 

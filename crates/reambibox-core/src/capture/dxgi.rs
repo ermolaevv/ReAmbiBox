@@ -37,13 +37,52 @@ pub enum CaptureError {
     InvalidFrame,
 }
 
-/// Захваченный кадр экрана с метаданными
+/// Захваченный кадр экрана с метаданными (владеющий буфером)
 pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
     pub row_pitch: u32,
     /// Буфер пикселей в формате BGRA
     pub data: Vec<u8>,
+}
+
+impl CapturedFrame {
+    pub fn as_view(&self) -> FrameView<'_> {
+        FrameView {
+            width: self.width,
+            height: self.height,
+            row_pitch: self.row_pitch,
+            data: &self.data,
+        }
+    }
+}
+
+/// Легковесное zero-allocation представление захваченного кадра (заимствующее память)
+#[derive(Debug, Clone, Copy)]
+pub struct FrameView<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub row_pitch: u32,
+    pub data: &'a [u8],
+}
+
+/// Трейт для полиморфной выборки пикселей из владеющего или заимствованного кадра
+pub trait AsFrameView {
+    fn as_frame_view(&self) -> FrameView<'_>;
+}
+
+impl<'a> AsFrameView for FrameView<'a> {
+    #[inline]
+    fn as_frame_view(&self) -> FrameView<'_> {
+        *self
+    }
+}
+
+impl AsFrameView for CapturedFrame {
+    #[inline]
+    fn as_frame_view(&self) -> FrameView<'_> {
+        self.as_view()
+    }
 }
 
 /// Информация об обнаруженном мониторе
@@ -274,7 +313,12 @@ impl DxgiCapture {
         Ok(self.staging_texture.as_ref().unwrap().clone())
     }
 
-    pub fn capture_frame(&mut self, timeout: Duration) -> Result<CapturedFrame, CaptureError> {
+    /// Zero-Allocation захват кадра с прямой передачей слайса отображенной видеопамяти
+    pub fn capture_frame_with<R>(
+        &mut self,
+        timeout: Duration,
+        f: impl FnOnce(&FrameView<'_>) -> R,
+    ) -> Result<R, CaptureError> {
         let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
 
@@ -315,24 +359,32 @@ impl DxgiCapture {
 
             let row_pitch = mapped.RowPitch;
             let total_bytes = (row_pitch * height) as usize;
-            let mut buffer = vec![0u8; total_bytes];
+            let slice = std::slice::from_raw_parts(mapped.pData as *const u8, total_bytes);
 
-            std::ptr::copy_nonoverlapping(
-                mapped.pData as *const u8,
-                buffer.as_mut_ptr(),
-                total_bytes,
-            );
+            let view = FrameView {
+                width,
+                height,
+                row_pitch,
+                data: slice,
+            };
+
+            let result = f(&view);
 
             self.context.Unmap(&staging, 0);
             let _ = self.duplication.ReleaseFrame();
 
-            Ok(CapturedFrame {
-                width,
-                height,
-                row_pitch,
-                data: buffer,
-            })
+            Ok(result)
         }
+    }
+
+    /// Захват кадра с копированием данных во владеющий буфер (для совместимости)
+    pub fn capture_frame(&mut self, timeout: Duration) -> Result<CapturedFrame, CaptureError> {
+        self.capture_frame_with(timeout, |view| CapturedFrame {
+            width: view.width,
+            height: view.height,
+            row_pitch: view.row_pitch,
+            data: view.data.to_vec(),
+        })
     }
 
     pub fn reconnect(&mut self) -> Result<(), CaptureError> {
@@ -357,5 +409,25 @@ mod tests {
                 m.index, m.adapter_name, m.output_name, m.x, m.y, m.width, m.height, m.is_primary
             );
         }
+    }
+
+    #[test]
+    fn test_frame_view_conversion() {
+        let dummy = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let frame = CapturedFrame {
+            width: 2,
+            height: 1,
+            row_pitch: 8,
+            data: dummy,
+        };
+
+        let view = frame.as_view();
+        assert_eq!(view.width, 2);
+        assert_eq!(view.height, 1);
+        assert_eq!(view.row_pitch, 8);
+        assert_eq!(view.data.len(), 8);
+
+        let view_from_trait = frame.as_frame_view();
+        assert_eq!(view_from_trait.width, 2);
     }
 }

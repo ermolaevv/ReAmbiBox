@@ -1,3 +1,5 @@
+use crate::capture::AsFrameView;
+#[cfg(test)]
 use crate::capture::CapturedFrame;
 use super::zone::NormalizedRect;
 
@@ -18,11 +20,12 @@ impl LetterboxDetector {
     }
 
     /// Анализ кадра и определение границ полезного изображения (без черных полос)
-    pub fn detect(&mut self, frame: &CapturedFrame) -> NormalizedRect {
-        let width = frame.width;
-        let height = frame.height;
-        let row_pitch = frame.row_pitch as usize;
-        let data = &frame.data;
+    pub fn detect(&mut self, frame: &impl AsFrameView) -> NormalizedRect {
+        let view = frame.as_frame_view();
+        let width = view.width;
+        let height = view.height;
+        let row_pitch = view.row_pitch as usize;
+        let data = view.data;
 
         let sample_cols = [width / 4, width / 2, (width * 3) / 4];
 

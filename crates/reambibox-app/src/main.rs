@@ -378,6 +378,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut capture: Option<DxgiCapture> = None;
             let mut smoother = TemporalSmoother::new();
             let mut music_vis = reambibox_core::audio::MusicVisualizer::new();
+            let mut letterbox_detector = reambibox_core::color::letterbox::LetterboxDetector::new(15);
+            let mut last_letterbox_check = Instant::now() - Duration::from_secs(10);
+            let mut active_viewport = reambibox_core::color::zone::NormalizedRect::new(0.0, 0.0, 1.0, 1.0);
             let mut last_sampled: Vec<RgbColor> = Vec::new();
             let mut frames_count: u64 = 0;
             let mut last_fps_time = Instant::now();
@@ -389,7 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let is_display_active = tray_ref.is_display_active();
 
                 // Читаем актуальные параметры синхронно из parking_lot::RwLock
-                let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones) = {
+                let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones, target_fps, letterbox_enabled) = {
                     let cfg = cfg_ref.read();
                     (
                         cfg.selected_monitor,
@@ -400,8 +403,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         cfg.mode.clone(),
                         cfg.static_color,
                         cfg.zones.clone(),
+                        cfg.target_fps,
+                        cfg.letterbox_detection,
                     )
                 };
+
+                let target_interval = Duration::from_millis(1000 / (target_fps.clamp(10, 120) as u64));
 
                 let led_count = zones.len();
                 if last_sampled.len() != led_count {
@@ -479,13 +486,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some(ref mut cap) = capture {
-                    match cap.capture_frame(Duration::from_millis(33)) {
-                        Ok(frame) => {
-                            last_sampled = zones.iter().map(|z| z.sample_color(&frame, 4)).collect();
-                            frames_count += 1;
+                    let mut frame_captured = false;
+                    let timeout = Duration::from_millis((1000 / (target_fps.clamp(10, 120) as u64)).max(15));
+                    let res = cap.capture_frame_with(timeout, |view| {
+                        // Если включен letterbox, обновляем геометрию раз в секунду
+                        if letterbox_enabled && last_letterbox_check.elapsed() >= Duration::from_secs(1) {
+                            last_letterbox_check = Instant::now();
+                            active_viewport = letterbox_detector.detect(view);
                         }
+
+                        // Высокопроизводительная адаптивная выборка цветов зон без аллокаций памяти
+                        if letterbox_enabled && (active_viewport.height < 0.95 || active_viewport.width < 0.95) {
+                            last_sampled = zones.iter().map(|z| {
+                                let mut adjusted = z.clone();
+                                adjusted.rect.x = active_viewport.x + z.rect.x * active_viewport.width;
+                                adjusted.rect.y = active_viewport.y + z.rect.y * active_viewport.height;
+                                adjusted.rect.width = z.rect.width * active_viewport.width;
+                                adjusted.rect.height = z.rect.height * active_viewport.height;
+                                adjusted.sample_color_adaptive(view)
+                            }).collect();
+                        } else {
+                            last_sampled = zones.iter().map(|z| z.sample_color_adaptive(view)).collect();
+                        }
+
+                        frames_count += 1;
+                        frame_captured = true;
+                    });
+
+                    match res {
+                        Ok(()) => {}
                         Err(reambibox_core::capture::CaptureError::Timeout) => {
-                            // Экран не изменился, используем предыдущие цвета
+                            // Содержимое экрана не изменилось — пропускаем повторный расчет
                         }
                         Err(reambibox_core::capture::CaptureError::AccessLost) => {
                             std::thread::sleep(Duration::from_millis(200));
@@ -496,18 +527,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    // Временное сглаживание
-                    let smoothed = smoother.smooth(&last_sampled, smoothing);
+                    if frame_captured {
+                        // Временное сглаживание
+                        let smoothed = smoother.smooth(&last_sampled, smoothing);
 
-                    // Коррекция яркости и гаммы в реальном времени
-                    let final_colors: Vec<_> = smoothed
-                        .into_iter()
-                        .map(|c| c.with_brightness_gamma(brightness, gamma))
-                        .collect();
+                        // Коррекция яркости и гаммы в реальном времени
+                        let final_colors: Vec<_> = smoothed
+                            .into_iter()
+                            .map(|c| c.with_brightness_gamma(brightness, gamma))
+                            .collect();
 
-                    {
-                        let mut out = colors_ref.write();
-                        *out = final_colors;
+                        {
+                            let mut out = colors_ref.write();
+                            *out = final_colors;
+                        }
                     }
                 }
 
@@ -518,8 +551,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let elapsed = start.elapsed();
-                if elapsed < Duration::from_millis(16) {
-                    std::thread::sleep(Duration::from_millis(16) - elapsed);
+                if elapsed < target_interval {
+                    std::thread::sleep(target_interval - elapsed);
                 }
             }
 

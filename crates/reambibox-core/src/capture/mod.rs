@@ -1,3 +1,3 @@
 pub mod dxgi;
 
-pub use dxgi::{CapturedFrame, CaptureError, DxgiCapture};
+pub use dxgi::{AsFrameView, CapturedFrame, CaptureError, DxgiCapture, FrameView, MonitorInfo};
