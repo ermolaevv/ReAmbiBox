@@ -47,9 +47,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const systemStatus = document.getElementById('system-status');
   const canvas = document.getElementById('monitor-canvas');
 
+  const btnSaveZones = document.getElementById('btn-save-zones');
+  const infoZoneId = document.getElementById('info-zone-id');
+  const infoZoneCoords = document.getElementById('info-zone-coords');
+  const toggleZoneSnapping = document.getElementById('toggle-zone-snapping');
+
   let currentConfig = null;
   let updateTimer = null;
   let pendingUpdates = {};
+
+  let activeSelectedZoneId = null;
+  let isInteractingWithZones = false;
+  let interactionMode = null;
+  let interactionZone = null;
 
   // Быстрая отправка с дебаунсом 30 мс
   function queueConfigUpdate(partial) {
@@ -274,22 +284,158 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Отрисовка зон
+  function updateZoneElement(box, z) {
+    box.style.left = (z.rect.x * 100) + '%';
+    box.style.top = (z.rect.y * 100) + '%';
+    box.style.width = (z.rect.width * 100) + '%';
+    box.style.height = (z.rect.height * 100) + '%';
+    if (activeSelectedZoneId === z.id) {
+      box.classList.add('active-zone');
+    } else {
+      box.classList.remove('active-zone');
+    }
+  }
+
+  function updateZoneInfo(z) {
+    if (!z || !infoZoneId) return;
+    infoZoneId.textContent = `№${z.id + 1}`;
+    if (infoZoneCoords) {
+      infoZoneCoords.textContent = `[X: ${(z.rect.x * 100).toFixed(1)}%, Y: ${(z.rect.y * 100).toFixed(1)}%, W: ${(z.rect.width * 100).toFixed(1)}%, H: ${(z.rect.height * 100).toFixed(1)}%]`;
+    }
+  }
+
+  function selectZone(id) {
+    activeSelectedZoneId = id;
+    const all = canvas.querySelectorAll('.zone-box');
+    all.forEach(b => {
+      if (parseInt(b.dataset.id) === id) {
+        b.classList.add('active-zone');
+      } else {
+        b.classList.remove('active-zone');
+      }
+    });
+    if (currentConfig && currentConfig.zones) {
+      const z = currentConfig.zones.find(x => x.id === id);
+      if (z) updateZoneInfo(z);
+    }
+  }
+
+  btnSaveZones?.addEventListener('click', () => {
+    if (currentConfig && currentConfig.zones) {
+      queueConfigUpdate({ zones: currentConfig.zones });
+      btnSaveZones.textContent = 'Сохранено!';
+      setTimeout(() => {
+        btnSaveZones.textContent = 'Сохранить зоны';
+      }, 1200);
+    }
+  });
+
+  // Отрисовка зон и привязка Drag & Drop событий
   function renderZones(zones) {
     if (!canvas || !zones) return;
+    if (isInteractingWithZones) return; // Не прерывать перетаскивание мыши
+
     canvas.innerHTML = '';
 
     zones.forEach((z) => {
       const box = document.createElement('div');
       box.className = 'zone-box';
-      box.style.left = (z.rect.x * 100) + '%';
-      box.style.top = (z.rect.y * 100) + '%';
-      box.style.width = (z.rect.width * 100) + '%';
-      box.style.height = (z.rect.height * 100) + '%';
+      box.dataset.id = z.id;
       box.textContent = (z.id + 1);
-      box.title = `Зона ${z.id + 1}: [x=${(z.rect.x*100).toFixed(1)}%, y=${(z.rect.y*100).toFixed(1)}%]`;
+      box.title = `Зона ${z.id + 1}: перетаскивайте мышкой или меняйте размер`;
+
+      const handle = document.createElement('div');
+      handle.className = 'zone-resize-handle';
+      handle.title = 'Потяните для изменения размера';
+      box.appendChild(handle);
+
+      updateZoneElement(box, z);
+
+      box.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        selectZone(z.id);
+
+        const isResize = e.target === handle;
+        interactionMode = isResize ? 'resize' : 'drag';
+        interactionZone = z;
+        isInteractingWithZones = true;
+
+        box.classList.add('dragging');
+        box.setPointerCapture(e.pointerId);
+
+        const rect = canvas.getBoundingClientRect();
+        const startPointerX = e.clientX;
+        const startPointerY = e.clientY;
+        const startZoneX = z.rect.x;
+        const startZoneY = z.rect.y;
+        const startZoneW = z.rect.width;
+        const startZoneH = z.rect.height;
+
+        const onPointerMove = (ev) => {
+          if (!isInteractingWithZones || !interactionZone) return;
+          const dx = (ev.clientX - startPointerX) / rect.width;
+          const dy = (ev.clientY - startPointerY) / rect.height;
+          const snapping = toggleZoneSnapping ? toggleZoneSnapping.checked : true;
+
+          if (interactionMode === 'drag') {
+            let newX = Math.max(0, Math.min(1 - startZoneW, startZoneX + dx));
+            let newY = Math.max(0, Math.min(1 - startZoneH, startZoneY + dy));
+
+            if (snapping) {
+              if (newX < 0.015) newX = 0;
+              if (newX + startZoneW > 0.985) newX = 1 - startZoneW;
+              if (newY < 0.015) newY = 0;
+              if (newY + startZoneH > 0.985) newY = 1 - startZoneH;
+            }
+
+            interactionZone.rect.x = Math.round(newX * 1000) / 1000;
+            interactionZone.rect.y = Math.round(newY * 1000) / 1000;
+          } else if (interactionMode === 'resize') {
+            let newW = Math.max(0.02, Math.min(1 - startZoneX, startZoneW + dx));
+            let newH = Math.max(0.02, Math.min(1 - startZoneY, startZoneH + dy));
+
+            if (snapping) {
+              if (startZoneX + newW > 0.985) newW = 1 - startZoneX;
+              if (startZoneY + newH > 0.985) newH = 1 - startZoneY;
+            }
+
+            interactionZone.rect.width = Math.round(newW * 1000) / 1000;
+            interactionZone.rect.height = Math.round(newH * 1000) / 1000;
+          }
+
+          updateZoneElement(box, interactionZone);
+          updateZoneInfo(interactionZone);
+        };
+
+        const onPointerUp = (ev) => {
+          box.classList.remove('dragging');
+          try {
+            box.releasePointerCapture(ev.pointerId);
+          } catch (_) {}
+          box.removeEventListener('pointermove', onPointerMove);
+          box.removeEventListener('pointerup', onPointerUp);
+          isInteractingWithZones = false;
+          interactionMode = null;
+          interactionZone = null;
+
+          // Сохраняем обновленные координаты зон
+          if (currentConfig && currentConfig.zones) {
+            queueConfigUpdate({ zones: currentConfig.zones });
+          }
+        };
+
+        box.addEventListener('pointermove', onPointerMove);
+        box.addEventListener('pointerup', onPointerUp);
+      });
+
       canvas.appendChild(box);
     });
+
+    if (activeSelectedZoneId !== null) {
+      selectZone(activeSelectedZoneId);
+    }
   }
 
   // Загрузка состояния с бэкенда
