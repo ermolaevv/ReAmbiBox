@@ -1,3 +1,8 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod autostart;
+mod tray;
+
 use reambibox_core::api::lightpack::LightpackServer;
 use reambibox_core::api::state::create_shared_state;
 use reambibox_core::capture::dxgi::DxgiCapture;
@@ -12,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tray::TrayManager;
 
 #[derive(Debug, Deserialize)]
 struct ConfigUpdate {
@@ -24,6 +30,7 @@ struct ConfigUpdate {
     color_order: Option<String>,
     static_color: Option<[u8; 3]>,
     selected_monitor: Option<usize>,
+    autostart: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,6 +51,7 @@ struct ApiStatusResponse {
     smoothing: f32,
     gamma: f32,
     letterbox: bool,
+    autostart: bool,
     mode: String,
     color_order: String,
     static_color: [u8; 3],
@@ -55,8 +63,47 @@ struct ApiStatusResponse {
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
+unsafe fn init_console_support() {
+    let args: Vec<String> = std::env::args().collect();
+    let has_console_flag = args.iter().any(|a| a == "--console" || a == "-c");
+
+    if cfg!(debug_assertions) || has_console_flag {
+        use windows::Win32::System::Console::{AllocConsole, AttachConsole, ATTACH_PARENT_PROCESS};
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+            let _ = AllocConsole();
+        }
+    }
+}
+
+unsafe fn setup_shutdown_handlers(port: String, baud: u32, leds: usize) {
+    // 1. Аварийный хук паники
+    let panic_port = port.clone();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("[Emergency] Аварийная остановка! Экстренное гашение светодиодов...");
+        AdalightDriver::emergency_blank(&panic_port, baud, leds);
+        default_hook(info);
+    }));
+
+    // 2. Сигнал закрытия консоли / Ctrl+C
+    unsafe extern "system" fn console_ctrl_handler(dw_ctrl_type: u32) -> windows::Win32::Foundation::BOOL {
+        println!("[Завершение] Получен системный сигнал {} — гасим подсветку", dw_ctrl_type);
+        let cfg = AppConfig::load();
+        AdalightDriver::emergency_blank(&cfg.serial_port, cfg.baud_rate, cfg.zones.len());
+        windows::Win32::Foundation::BOOL(0)
+    }
+
+    use windows::Win32::System::Console::SetConsoleCtrlHandler;
+    let _ = SetConsoleCtrlHandler(Some(console_ctrl_handler), true);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Подключение к консоли (при --console или в debug-сборке)
+    unsafe {
+        init_console_support();
+    }
+
     println!("============================================================");
     println!("        ReAmbiBox v0.1.0 — High-Performance Ambilight      ");
     println!("============================================================");
@@ -68,6 +115,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - Активных светодиодных зон: {}", initial_cfg.zones.len());
     println!("  - Режим: {}, Яркость: {:.0}%, Сглаживание: {:.2}, Гамма: {:.1}",
              initial_cfg.mode, initial_cfg.brightness * 100.0, initial_cfg.smoothing, initial_cfg.gamma);
+
+    // Установка обработчиков экстренного выключения подсветки
+    unsafe {
+        setup_shutdown_handlers(initial_cfg.serial_port.clone(), initial_cfg.baud_rate, initial_cfg.zones.len());
+    }
 
     let shared_config = Arc::new(parking_lot::RwLock::new(initial_cfg.clone()));
     let shared_state = create_shared_state();
@@ -86,14 +138,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let capture_fps = Arc::new(parking_lot::RwLock::new(0.0f32));
     let is_running = Arc::new(AtomicBool::new(true));
 
-    // 2. Запуск Lightpack API сервера (порт 3636)
+    // 2. Инициализация системного трея и мониторинга питания Windows
+    let tray_manager = Arc::new(TrayManager::new());
+    tray_manager.run_tray_thread(Arc::clone(&shared_config), Arc::clone(&is_running));
+    println!(">>> [OK] Системный трей Windows и мониторинг событий питания активны.");
+
+    // 3. Запуск Lightpack API сервера (порт 3636)
     let lp_server = LightpackServer::new(shared_state.clone(), LightpackServer::DEFAULT_PORT);
     tokio::spawn(async move {
         let _ = lp_server.run().await;
     });
     println!(">>> [OK] Lightpack API сервер активен на 127.0.0.1:3636");
 
-    // 3. Выделенный независимый аппаратный поток вывода в COM-порт (Adalight)
+    // 4. Выделенный независимый аппаратный поток вывода в COM-порт (Adalight)
     {
         let colors_ref = Arc::clone(&output_colors);
         let status_ref = Arc::clone(&serial_status);
@@ -182,15 +239,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::thread::sleep(frame_interval - elapsed);
                 }
             }
+
+            // При выходе из цикла гарантированно гасим ленту
+            let _ = driver.blank_leds();
+            let _ = driver.disconnect();
         });
     }
 
-    // 4. Выделенный поток DXGI захвата экрана и цветового процессинга
+    // 5. Выделенный поток DXGI захвата экрана и цветового процессинга
     {
         let colors_ref = Arc::clone(&output_colors);
         let cfg_ref = Arc::clone(&shared_config);
         let fps_ref = Arc::clone(&capture_fps);
         let run_ref = Arc::clone(&is_running);
+        let tray_ref = Arc::clone(&tray_manager);
 
         std::thread::spawn(move || {
             let mut current_mon: usize = 99999;
@@ -202,6 +264,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             while run_ref.load(Ordering::Relaxed) {
                 let start = Instant::now();
+
+                // Проверяем активность дисплея (сон экрана или блокировка ПК)
+                let is_display_active = tray_ref.is_display_active();
 
                 // Читаем актуальные параметры синхронно из parking_lot::RwLock
                 let (mon_idx, is_active, brightness, smoothing, gamma, mode, static_color, zones) = {
@@ -223,8 +288,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_sampled = vec![RgbColor::BLACK; led_count];
                 }
 
-                // Обработка состояния: Выключено
-                if !is_active {
+                // Обработка состояния: Выключено или Дисплей спит / Сессия заблокирована
+                if !is_active || !is_display_active {
                     {
                         let mut out = colors_ref.write();
                         *out = vec![RgbColor::BLACK; led_count];
@@ -311,13 +376,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::thread::sleep(Duration::from_millis(16) - elapsed);
                 }
             }
+
+            // Гасим ленту при остановке потока захвата
+            {
+                let mut out = colors_ref.write();
+                let count = out.len();
+                *out = vec![RgbColor::BLACK; count];
+            }
         });
     }
 
     println!(">>> [OK] Аппаратный поток DXGI захвата активен.");
     println!(">>> [OK] Выделенный поток COM-порта активен.");
 
-    // 5. Запуск WebUI + REST API сервера (порт 3637)
+    // 6. Запуск WebUI + REST API сервера (порт 3637)
     let web_config = Arc::clone(&shared_config);
     let web_state = Arc::clone(&shared_state);
     let web_serial_status = Arc::clone(&serial_status);
@@ -417,6 +489,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         smoothing: cfg.smoothing,
                         gamma: cfg.gamma,
                         letterbox: cfg.letterbox_detection,
+                        autostart: autostart::is_autostart_enabled(),
                         mode: cfg.mode.clone(),
                         color_order: cfg.color_order.clone(),
                         static_color: cfg.static_color,
@@ -489,6 +562,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 println!("[API] Выбран монитор: {}", mon);
                                 cfg.selected_monitor = mon;
                             }
+                            if let Some(auto) = update.autostart {
+                                let _ = autostart::set_autostart(auto);
+                                println!("[API] Автозагрузка Windows: {}", if auto { "ВКЛ" } else { "ВЫКЛ" });
+                            }
 
                             let _ = cfg.save();
                         }
@@ -523,8 +600,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Главный цикл держит процесс живым и периодически выводит статус
     let mut stats_timer = Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(3)).await;
+    while is_running.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(500)).await;
         if stats_timer.elapsed() >= Duration::from_secs(3) {
             let cfg = shared_config.read().clone();
             let c_fps = *capture_fps.read();
@@ -538,4 +615,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             stats_timer = Instant::now();
         }
     }
+
+    println!("[Выход] Приложение ReAmbiBox завершает работу...");
+    let cfg = shared_config.read().clone();
+    AdalightDriver::emergency_blank(&cfg.serial_port, cfg.baud_rate, cfg.zones.len());
+
+    Ok(())
 }

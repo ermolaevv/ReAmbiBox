@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const sliderGamma = document.getElementById('slider-gamma');
   const valGamma = document.getElementById('val-gamma');
   const toggleLetterbox = document.getElementById('toggle-letterbox');
+  const toggleAutostart = document.getElementById('toggle-autostart');
 
   const selectMonitor = document.getElementById('select-monitor');
   const selectColorOrder = document.getElementById('select-color-order');
@@ -79,6 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Привязка детектора 21:9
   toggleLetterbox?.addEventListener('change', (e) => {
     queueConfigUpdate({ letterbox: e.target.checked });
+  });
+
+  // Привязка автозапуска Windows
+  toggleAutostart?.addEventListener('change', (e) => {
+    queueConfigUpdate({ autostart: e.target.checked });
   });
 
   // Переключение режимов
@@ -192,6 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (toggleLetterbox) {
           toggleLetterbox.checked = data.letterbox;
+        }
+        if (toggleAutostart) {
+          toggleAutostart.checked = data.autostart;
         }
 
         // Заполняем мониторы

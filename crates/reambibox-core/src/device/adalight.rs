@@ -10,6 +10,7 @@ pub struct AdalightDriver {
     port_name: String,
     baud_rate: u32,
     color_order: String,
+    last_led_count: usize,
     port: Option<Box<dyn SerialPort>>,
 }
 
@@ -22,12 +23,43 @@ impl AdalightDriver {
             port_name: port_name.into(),
             baud_rate,
             color_order: "RGB".to_string(),
+            last_led_count: 98,
             port: None,
         }
     }
 
     pub fn set_color_order(&mut self, order: impl Into<String>) {
         self.color_order = order.into();
+    }
+
+    pub fn set_led_count(&mut self, count: usize) {
+        if count > 0 {
+            self.last_led_count = count;
+        }
+    }
+
+    /// Принудительное гашение всех светодиодов (отправка чёрного кадра)
+    pub fn blank_leds(&mut self) -> Result<(), DeviceError> {
+        let count = self.last_led_count.max(1);
+        let black_packet = Self::build_packet_with_order(&vec![RgbColor::BLACK; count], &self.color_order)?;
+        if let Some(port) = self.port.as_mut() {
+            let _ = port.write_all(&black_packet);
+            let _ = port.flush();
+        }
+        Ok(())
+    }
+
+    /// Аварийное гашение ленты при завершении процесса или панике
+    pub fn emergency_blank(port_name: &str, baud_rate: u32, led_count: usize) {
+        if let Ok(mut port) = serialport::new(port_name, baud_rate)
+            .timeout(Duration::from_millis(200))
+            .open()
+        {
+            if let Ok(packet) = Self::build_packet(&vec![RgbColor::BLACK; led_count.max(1)]) {
+                let _ = port.write_all(&packet);
+                let _ = port.flush();
+            }
+        }
     }
 
     /// Формирование полного бинарного пакета протокола Adalight с учетом порядка цветов
@@ -126,6 +158,7 @@ impl DeviceDriver for AdalightDriver {
     }
 
     fn disconnect(&mut self) -> Result<(), DeviceError> {
+        let _ = self.blank_leds();
         if let Some(mut port) = self.port.take() {
             let _ = port.flush();
             info!("Отключено от Adalight на {}", self.port_name);
@@ -138,6 +171,7 @@ impl DeviceDriver for AdalightDriver {
     }
 
     fn send_frame(&mut self, frame: &DeviceFrame) -> Result<(), DeviceError> {
+        self.last_led_count = frame.colors.len();
         let packet = Self::build_packet_with_order(&frame.colors, &self.color_order)?;
 
         let port = match self.port.as_mut() {
@@ -153,6 +187,12 @@ impl DeviceDriver for AdalightDriver {
 
         let _ = port.flush();
         Ok(())
+    }
+}
+
+impl Drop for AdalightDriver {
+    fn drop(&mut self) {
+        let _ = self.disconnect();
     }
 }
 
