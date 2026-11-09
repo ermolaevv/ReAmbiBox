@@ -41,10 +41,13 @@ jobs:
       - name: Generate SHA256 checksums
         shell: pwsh
         run: |
-          Get-ChildItem -Path target/dist -File | ForEach-Object {
-            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash
-            "$hash  $($_.Name)"
-          } | Out-File -FilePath target/dist/SHA256SUMS.txt -Encoding utf8
+          $lines = Get-ChildItem -Path target/dist -File |
+            Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+            ForEach-Object {
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash
+              "$hash  $($_.Name)"
+            }
+          $lines | Out-File -FilePath target/dist/SHA256SUMS.txt -Encoding utf8
           Get-Content target/dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
