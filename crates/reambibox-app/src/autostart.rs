@@ -128,7 +128,11 @@ mod tests {
         assert_eq!(extract_exe_path(""), None);
     }
 
+    /// Интеграционный тест: пишет во временный ключ реестра Windows.
+    /// Требует реальную Windows-сессию с доступом к HKCU.
+    /// В CI/sandbox помечен как #[ignore] — запускайте вручную: `cargo test -- --ignored`
     #[test]
+    #[ignore = "registry integration test: requires interactive Windows session"]
     fn test_autostart_toggle() {
         // Тестируем логику автозапуска строго на изолированном ключе TEST_APP_KEY,
         // чтобы тесты Cargo никогда не портили реальную системную запись ReAmbiBox пользователя.
