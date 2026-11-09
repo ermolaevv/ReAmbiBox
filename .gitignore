@@ -1,6 +1,17 @@
+# Rust build artifacts
 /target/
 **/*.rs.bk
 *.pdb
+
+# IDE and Editor files
 .vscode/
 .idea/
+*.suo
+*.user
 
+# Windows OS files
+[Tt]humbs.db
+[Dd]esktop.ini
+
+# App runtime config (generated on first run)
+config.json
