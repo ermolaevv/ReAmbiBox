@@ -51,6 +51,7 @@ struct ConfigUpdate {
     white_balance_b: Option<f32>,
     black_level_threshold: Option<u8>,
     saturation_boost: Option<f32>,
+    language: Option<String>,
     hotkeys: Option<HotkeysConfig>,
 }
 
@@ -99,6 +100,7 @@ struct ApiStatusResponse {
     hotkeys: HotkeysConfig,
     presets: Vec<reambibox_core::config::Preset>,
     active_preset: Option<String>,
+    language: String,
     zones: Vec<reambibox_core::color::zone::Zone>,
 }
 
@@ -782,6 +784,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         hotkeys: cfg.hotkeys.clone(),
                         presets: cfg.presets.clone(),
                         active_preset: cfg.active_preset.clone(),
+                        language: cfg.language.clone(),
                         zones: cfg.zones.clone(),
                     };
 
@@ -945,6 +948,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(sb) = update.saturation_boost {
                                 cfg.saturation_boost = sb.clamp(0.0, 2.0);
                             }
+                            if let Some(lang) = update.language {
+                                println!("[API] Смена языка: {}", lang);
+                                cfg.language = lang;
+                            }
                             if let Some(true) = update.reconnect {
                                 println!("[API] Запрос принудительного аппаратного сброса/переподключения контроллера");
                                 recon_ref.store(true, Ordering::Relaxed);
@@ -1104,9 +1111,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Статика: CSS, JS, HTML
                 let (content_type, body) = if req_text.starts_with("GET /style.css") {
-                    ("text/css", include_str!("../../../ui/style.css"))
+                    ("text/css; charset=utf-8", include_str!("../../../ui/style.css"))
                 } else if req_text.starts_with("GET /app.js") {
-                    ("application/javascript", include_str!("../../../ui/app.js"))
+                    ("application/javascript; charset=utf-8", include_str!("../../../ui/app.js"))
+                } else if req_text.starts_with("GET /i18n.js") {
+                    ("application/javascript; charset=utf-8", include_str!("../../../ui/i18n.js"))
                 } else {
                     ("text/html; charset=utf-8", include_str!("../../../ui/index.html"))
                 };

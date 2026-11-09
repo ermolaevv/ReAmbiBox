@@ -11,20 +11,26 @@
   <div class="app-container">
     <!-- Боковая панель -->
     <aside class="sidebar">
-      <div class="logo">
-        <div class="logo-icon"></div>
-        <h2>ReAmbiBox</h2>
+      <div class="sidebar-top">
+        <div class="logo">
+          <div class="logo-icon"></div>
+          <h2>ReAmbiBox</h2>
+        </div>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button id="btn-lang-ru" class="btn-lang active" type="button" title="Русский">RU</button>
+          <button id="btn-lang-en" class="btn-lang" type="button" title="English">EN</button>
+        </div>
       </div>
       <nav class="nav-menu">
-        <button class="nav-item active" data-tab="dashboard">Панель управления</button>
-        <button class="nav-item" data-tab="zones">Редактор зон</button>
-        <button class="nav-item" data-tab="hardware">Оборудование</button>
-        <button class="nav-item" data-tab="api">Lightpack API</button>
+        <button class="nav-item active" data-tab="dashboard" data-i18n="nav.dashboard">Панель управления</button>
+        <button class="nav-item" data-tab="zones" data-i18n="nav.zones">Редактор зон</button>
+        <button class="nav-item" data-tab="hardware" data-i18n="nav.hardware">Оборудование</button>
+        <button class="nav-item" data-tab="api" data-i18n="nav.api">Lightpack API</button>
       </nav>
       <div class="sidebar-footer">
         <div class="status-indicator">
           <span class="dot active"></span>
-          <span id="system-status">Активен (COM10)</span>
+          <span id="system-status">Активен</span>
         </div>
       </div>
     </aside>
@@ -34,10 +40,10 @@
       <!-- Вкладка: Панель управления -->
       <section id="tab-dashboard" class="tab-pane active">
         <header class="content-header">
-          <h1>Управление подсветкой</h1>
+          <h1 data-i18n="dash.title">Управление подсветкой</h1>
           <div class="header-buttons" style="display:flex; gap:10px;">
-            <button id="btn-mode-toggle" class="btn btn-secondary">Тест белым (100% LED)</button>
-            <button id="toggle-power" class="btn btn-primary">Выключить подсветку</button>
+            <button id="btn-mode-toggle" class="btn btn-secondary" data-i18n="dash.btn_white_test">Тест белым (100% LED)</button>
+            <button id="toggle-power" class="btn btn-primary" data-i18n="dash.btn_power_off">Выключить подсветку</button>
           </div>
         </header>
 
@@ -46,41 +52,41 @@
           <div class="card" style="grid-column: 1 / -1;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
-                <h3 style="margin: 0;">Пресеты настроек</h3>
+                <h3 style="margin: 0;" data-i18n="dash.presets_title">Пресеты настроек</h3>
                 <span id="label-active-preset" class="badge-preset" style="display:none;"></span>
               </div>
-              <button id="btn-save-as-preset" class="btn btn-secondary" style="font-size: 13px; padding: 6px 14px;">+ Сохранить текущие как пресет</button>
+              <button id="btn-save-as-preset" class="btn btn-secondary" style="font-size: 13px; padding: 6px 14px;" data-i18n="dash.btn_save_preset">+ Сохранить текущие как пресет</button>
             </div>
 
             <div id="presets-container" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center;">
-              <div id="presets-empty-hint" style="font-size: 13px; color: var(--text-muted);">
+              <div id="presets-empty-hint" style="font-size: 13px; color: var(--text-muted);" data-i18n="dash.presets_empty">
                 Нет сохранённых пресетов. Настройте желаемые параметры и нажмите «+ Сохранить текущие как пресет».
               </div>
             </div>
           </div>
 
           <div class="card">
-            <h3>Режим работы</h3>
+            <h3 data-i18n="dash.mode_title">Режим работы</h3>
             <div style="display:flex; gap:8px;">
-              <button id="btn-mode-screen" class="btn btn-primary" style="flex:1;">Экран</button>
-              <button id="btn-mode-music" class="btn btn-secondary" style="flex:1;">Музыка</button>
-              <button id="btn-mode-static" class="btn btn-secondary" style="flex:1;">Тест</button>
+              <button id="btn-mode-screen" class="btn btn-primary" style="flex:1;" data-i18n="dash.mode_screen">Экран</button>
+              <button id="btn-mode-music" class="btn btn-secondary" style="flex:1;" data-i18n="dash.mode_music">Музыка</button>
+              <button id="btn-mode-static" class="btn btn-secondary" style="flex:1;" data-i18n="dash.mode_static">Тест</button>
             </div>
           </div>
 
           <div class="card" id="card-music-settings" style="grid-column: 1 / -1; display: none;">
-            <h3>Светомузыка (WASAPI Audio Reactive)</h3>
+            <h3 data-i18n="dash.music_title">Светомузыка (WASAPI Audio Reactive)</h3>
             <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
               <div style="display: flex; align-items: center; gap: 10px;">
-                <label style="font-size: 14px; color: var(--text-muted);">Эффект:</label>
+                <label style="font-size: 14px; color: var(--text-muted);" data-i18n="dash.music_effect">Эффект:</label>
                 <select id="select-audio-effect" class="input-field" style="padding: 8px 12px; background: #1f2937; color: #fff; border: 1px solid var(--border-color); border-radius: 6px;">
-                  <option value="pulse">Beat Pulse (Пульсация под бит)</option>
-                  <option value="spectrum">VU Spectrum (Эквалайзер)</option>
-                  <option value="wave">Color Wave (Бегущая волна)</option>
+                  <option value="pulse" data-i18n="dash.effect_pulse">Beat Pulse (Пульсация под бит)</option>
+                  <option value="spectrum" data-i18n="dash.effect_spectrum">VU Spectrum (Эквалайзер)</option>
+                  <option value="wave" data-i18n="dash.effect_wave">Color Wave (Бегущая волна)</option>
                 </select>
               </div>
               <div style="display: flex; align-items: center; gap: 12px; flex: 1; min-width: 260px;">
-                <label style="font-size: 14px; color: var(--text-muted);">Чувствительность:</label>
+                <label style="font-size: 14px; color: var(--text-muted);" data-i18n="dash.music_sens">Чувствительность:</label>
                 <input type="range" id="slider-audio-sensitivity" min="20" max="300" value="100" style="flex: 1;">
                 <span id="val-audio-sensitivity" style="min-width: 45px; font-weight: 600;">1.0x</span>
               </div>
@@ -88,7 +94,7 @@
           </div>
 
           <div class="card">
-            <h3>Яркость подсветки</h3>
+            <h3 data-i18n="dash.brightness">Яркость подсветки</h3>
             <div class="slider-control">
               <input type="range" id="slider-brightness" min="0" max="100" value="100">
               <span id="val-brightness">100%</span>
@@ -96,7 +102,7 @@
           </div>
 
           <div class="card">
-            <h3>Временное сглаживание</h3>
+            <h3 data-i18n="dash.smoothing">Временное сглаживание</h3>
             <div class="slider-control">
               <input type="range" id="slider-smoothing" min="0" max="95" value="50">
               <span id="val-smoothing">0.50</span>
@@ -104,7 +110,7 @@
           </div>
 
           <div class="card">
-            <h3>Гамма-коррекция</h3>
+            <h3 data-i18n="dash.gamma">Гамма-коррекция</h3>
             <div class="slider-control">
               <input type="range" id="slider-gamma" min="10" max="30" value="22">
               <span id="val-gamma">2.2</span>
@@ -112,7 +118,7 @@
           </div>
 
           <div class="card">
-            <h3>Детекция черных полос (21:9)</h3>
+            <h3 data-i18n="dash.letterbox">Детекция черных полос (21:9)</h3>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-letterbox" checked>
               <span class="toggle-slider"></span>
@@ -121,14 +127,14 @@
 
           <div class="card" style="grid-column: 1 / -1;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-              <h3 style="margin: 0;">Калибровка цвета под интерьер (Баланс белого и чёрного)</h3>
-              <button id="btn-reset-calibration" class="btn btn-secondary" style="font-size: 12px; padding: 4px 10px;">Сбросить по умолчанию</button>
+              <h3 style="margin: 0;" data-i18n="dash.calibration_title">Калибровка цвета под интерьер (Баланс белого и чёрного)</h3>
+              <button id="btn-reset-calibration" class="btn btn-secondary" style="font-size: 12px; padding: 4px 10px;" data-i18n="dash.btn_reset_default">Сбросить по умолчанию</button>
             </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
               <!-- Баланс белого: R, G, B -->
               <div style="background: rgba(0,0,0,0.25); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-color);">Баланс белого (R / G / B Gain)</div>
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-color);" data-i18n="dash.wb_title">Баланс белого (R / G / B Gain)</div>
                 <div class="wb-slider-row">
                   <span style="color: #ef4444; font-weight: 700; width: 16px;">R</span>
                   <input type="range" id="slider-wb-r" class="slider-red" min="0" max="200" value="100">
@@ -150,32 +156,22 @@
               <div style="background: rgba(0,0,0,0.25); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; justify-content: space-around; gap: 12px;">
                 <div>
                   <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px;">
-                    <span>Отсечка чёрного (Black Level):</span>
+                    <span data-i18n="dash.black_threshold_title">Отсечка чёрного (Black Level):</span>
                     <span id="val-black-threshold" style="color: var(--primary-color);">Выкл (0)</span>
                   </div>
                   <input type="range" id="slider-black-threshold" min="0" max="50" value="0" style="width: 100%;">
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Гасит ленту в тёмных сценах (рекомендуется 5–15)</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;" data-i18n="dash.black_threshold_hint">Гасит ленту в тёмных сценах (рекомендуется 5–15)</div>
                 </div>
 
                 <div>
                   <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 6px;">
-                    <span>Насыщенность (Saturation Boost):</span>
+                    <span data-i18n="dash.saturation_title">Насыщенность (Saturation Boost):</span>
                     <span id="val-saturation" style="color: var(--primary-color);">100%</span>
                   </div>
                   <input type="range" id="slider-saturation" min="0" max="200" value="100" style="width: 100%;">
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Делает цвета сочнее без искажения оттенков</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;" data-i18n="dash.saturation_hint">Делает цвета сочнее без искажения оттенков</div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div class="card" style="grid-column: 1 / -1; background: rgba(30, 34, 45, 0.7); border: 1px solid rgba(255, 255, 255, 0.08);">
-            <h3 style="margin-bottom: 8px;">Глобальные горячие клавиши Windows</h3>
-            <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-muted);">
-              <div><kbd style="background:#2a2f3d; padding:3px 7px; border-radius:4px; color:#fff; border:1px solid #444; font-weight:600;">Ctrl+Shift+A</kbd> — Вкл / Выкл подсветку</div>
-              <div><kbd style="background:#2a2f3d; padding:3px 7px; border-radius:4px; color:#fff; border:1px solid #444; font-weight:600;">Ctrl+Shift+▲ / ▼</kbd> — Яркость ±10%</div>
-              <div><kbd style="background:#2a2f3d; padding:3px 7px; border-radius:4px; color:#fff; border:1px solid #444; font-weight:600;">Ctrl+Shift+O</kbd> — Оверлей зон на экране</div>
-              <div><kbd style="background:#2a2f3d; padding:3px 7px; border-radius:4px; color:#fff; border:1px solid #444; font-weight:600;">Esc</kbd> — Сохранить и закрыть оверлей</div>
             </div>
           </div>
         </div>
@@ -184,25 +180,24 @@
       <!-- Вкладка: Редактор зон -->
       <section id="tab-zones" class="tab-pane">
         <header class="content-header">
-          <h1>Редактор зон экрана</h1>
+          <h1 data-i18n="zones.title">Редактор зон экрана</h1>
           <div class="header-actions">
-            <button id="btn-save-zones" class="btn btn-primary">Сохранить зоны</button>
-            <button id="btn-toggle-overlay" class="btn btn-secondary">Показать на экране (Оверлей)</button>
-            <button id="btn-open-wizard" class="btn btn-secondary">Мастер периметра</button>
+            <button id="btn-save-zones" class="btn btn-primary" data-i18n="zones.btn_save">Сохранить зоны</button>
+            <button id="btn-toggle-overlay" class="btn btn-secondary" data-i18n="zones.btn_overlay_show">Показать на экране (Оверлей)</button>
+            <button id="btn-open-wizard" class="btn btn-secondary" data-i18n="zones.btn_wizard">Мастер периметра</button>
           </div>
         </header>
 
         <div class="zone-editor-toolbar">
           <div class="zone-info-badge" id="zone-selected-info">
-            <span class="info-label">Выбрана зона:</span>
-            <strong id="info-zone-id">Кликните на зону</strong>
+            <span class="info-label" data-i18n="zones.selected_zone">Выбрана зона:</span>
+            <strong id="info-zone-id">№1</strong>
             <span id="info-zone-coords" style="color:var(--text-muted); font-size:12px; margin-left:8px;"></span>
           </div>
           <div style="display:flex; align-items:center; gap:12px;">
             <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); cursor:pointer;">
-              <input type="checkbox" id="toggle-zone-snapping" checked> Привязка к краям (Snapping)
+              <input type="checkbox" id="toggle-zone-snapping" checked> <span data-i18n="zones.snapping">Привязка к краям (Snapping)</span>
             </label>
-            <span style="font-size:12px; color:var(--text-muted);">Перетаскивайте мышкой или тяните за правый нижний угол</span>
           </div>
         </div>
 
@@ -217,46 +212,46 @@
       <div id="modal-wizard" class="modal-backdrop" style="display:none;">
         <div class="modal-card">
           <div class="modal-header">
-            <h3>Мастер расстановки зон по периметру</h3>
+            <h3 data-i18n="wiz.title">Мастер расстановки зон по периметру</h3>
             <button id="btn-close-wizard" class="btn-icon">&times;</button>
           </div>
           <div class="modal-body">
             <div class="grid-2col">
               <div class="setting-row">
-                <label>Сверху (Top LED):</label>
+                <label data-i18n="wiz.top">Сверху (Top LED):</label>
                 <input type="number" id="wiz-top" value="26" min="0" max="200" class="input-field" style="max-width:100px;">
               </div>
               <div class="setting-row">
-                <label>Снизу (Bottom LED):</label>
+                <label data-i18n="wiz.bottom">Снизу (Bottom LED):</label>
                 <input type="number" id="wiz-bottom" value="25" min="0" max="200" class="input-field" style="max-width:100px;">
               </div>
               <div class="setting-row">
-                <label>Слева (Left LED):</label>
+                <label data-i18n="wiz.left">Слева (Left LED):</label>
                 <input type="number" id="wiz-left" value="24" min="0" max="200" class="input-field" style="max-width:100px;">
               </div>
               <div class="setting-row">
-                <label>Справа (Right LED):</label>
+                <label data-i18n="wiz.right">Справа (Right LED):</label>
                 <input type="number" id="wiz-right" value="23" min="0" max="200" class="input-field" style="max-width:100px;">
               </div>
             </div>
             <div class="setting-row">
-              <label>Начальный угол:</label>
+              <label data-i18n="wiz.corner">Начальный угол:</label>
               <select id="wiz-corner" class="input-field" style="max-width:220px;">
-                <option value="BottomLeft" selected>Нижний левый (Bottom-Left)</option>
-                <option value="BottomRight">Нижний правый (Bottom-Right)</option>
-                <option value="TopLeft">Верхний левый (Top-Left)</option>
-                <option value="TopRight">Верхний правый (Top-Right)</option>
+                <option value="BottomLeft" selected data-i18n="wiz.corner_bl">Нижний левый (Bottom-Left)</option>
+                <option value="BottomRight" data-i18n="wiz.corner_br">Нижний правый (Bottom-Right)</option>
+                <option value="TopLeft" data-i18n="wiz.corner_tl">Верхний левый (Top-Left)</option>
+                <option value="TopRight" data-i18n="wiz.corner_tr">Верхний правый (Top-Right)</option>
               </select>
             </div>
             <div class="setting-row">
-              <label>Направление обхода:</label>
+              <label data-i18n="wiz.dir">Направление обхода:</label>
               <select id="wiz-direction" class="input-field" style="max-width:220px;">
-                <option value="Clockwise" selected>По часовой стрелке (Clockwise)</option>
-                <option value="CounterClockwise">Против часовой стрелки</option>
+                <option value="Clockwise" selected data-i18n="wiz.dir_cw">По часовой стрелке (Clockwise)</option>
+                <option value="CounterClockwise" data-i18n="wiz.dir_ccw">Против часовой стрелки</option>
               </select>
             </div>
             <div class="setting-row">
-              <label>Глубина захвата:</label>
+              <label data-i18n="wiz.depth">Глубина захвата:</label>
               <div style="display:flex; align-items:center; gap:10px; max-width:220px; width:100%;">
                 <input type="range" id="wiz-depth" min="3" max="20" value="8" style="flex:1;">
                 <span id="val-wiz-depth" style="min-width:35px; font-weight:600;">8%</span>
@@ -264,8 +259,8 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button id="btn-preset-98" class="btn btn-secondary">Предустановка 98 LED</button>
-            <button id="btn-apply-wizard" class="btn btn-primary">Применить к экрану</button>
+            <button id="btn-preset-98" class="btn btn-secondary" data-i18n="wiz.preset_98">Предустановка 98 LED</button>
+            <button id="btn-apply-wizard" class="btn btn-primary" data-i18n="wiz.btn_apply">Применить к экрану</button>
           </div>
         </div>
       </div>
@@ -273,30 +268,30 @@
       <!-- Вкладка: Оборудование -->
       <section id="tab-hardware" class="tab-pane">
         <header class="content-header">
-          <h1>Настройки оборудования</h1>
+          <h1 data-i18n="hw.title">Настройки оборудования</h1>
         </header>
         <div class="card settings-card">
           <div class="setting-row">
-            <label>Тип подключения / Вывод:</label>
+            <label data-i18n="hw.output_type">Тип подключения / Вывод:</label>
             <select id="select-output-type" style="flex:1;">
-              <option value="serial" selected>USB Serial (Adalight / COM-порт)</option>
-              <option value="wled">Wi-Fi Сеть (WLED / ESP32 / DDP)</option>
+              <option value="serial" selected data-i18n="hw.type_serial">USB Serial (Adalight / COM-порт)</option>
+              <option value="wled" data-i18n="hw.type_wled">Wi-Fi Сеть (WLED / ESP32 / DDP)</option>
             </select>
           </div>
 
           <!-- Настройки COM-порта (Adalight) -->
           <div id="group-serial-settings">
             <div class="setting-row">
-              <label>Последовательный порт (COM):</label>
+              <label data-i18n="hw.serial_port">Последовательный порт (COM):</label>
               <div style="display:flex; gap:10px; flex:1;">
                 <select id="select-port" style="flex:1;">
                   <option value="COM10" selected>COM10</option>
                 </select>
-                <button id="btn-reconnect-port" class="btn btn-secondary" style="white-space:nowrap; padding:6px 14px; font-size:13px;" title="Аппаратный DTR сброс контроллера и очистка буфера">Сброс / Переподключение</button>
+                <button id="btn-reconnect-port" class="btn btn-secondary" style="white-space:nowrap; padding:6px 14px; font-size:13px;" data-i18n="hw.btn_reconnect" title="Аппаратный DTR сброс контроллера и очистка буфера">Сброс / Переподключение</button>
               </div>
             </div>
             <div class="setting-row">
-              <label>Скорость передачи (Baud):</label>
+              <label data-i18n="hw.baud_rate">Скорость передачи (Baud):</label>
               <select id="select-baud">
                 <option value="115200" selected>115200 (Adalight Default)</option>
                 <option value="250000">250000</option>
@@ -310,52 +305,52 @@
           <!-- Настройки WLED по сети (Wi-Fi / UDP) -->
           <div id="group-wled-settings" style="display:none;">
             <div class="setting-row">
-              <label>IP-адрес WLED контроллера:</label>
+              <label data-i18n="hw.wled_host">IP-адрес WLED контроллера:</label>
               <input type="text" id="input-wled-host" placeholder="192.168.1.100" style="flex:1; padding:7px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1e1e24; color:#fff; font-family:monospace;">
             </div>
             <div class="setting-row">
-              <label>UDP порт:</label>
+              <label data-i18n="hw.wled_port">UDP порт:</label>
               <input type="number" id="input-wled-port" value="4048" min="1" max="65535" style="width:120px; padding:7px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1e1e24; color:#fff;">
             </div>
             <div class="setting-row">
-              <label>Сетевой протокол:</label>
+              <label data-i18n="hw.wled_protocol">Сетевой протокол:</label>
               <select id="select-wled-protocol" style="flex:1;">
                 <option value="ddp" selected>DDP (Distributed Display Protocol — рекомендуется)</option>
                 <option value="warls">WARLS (Realtime UDP)</option>
               </select>
             </div>
             <div class="setting-row">
-              <label>Проверка связи:</label>
+              <label data-i18n="hw.btn_test_wled">Проверка связи:</label>
               <div style="display:flex; align-items:center; gap:10px; flex:1;">
-                <button id="btn-test-wled" class="btn btn-secondary" style="padding:6px 14px; font-size:13px;">Тестовый кадр (Blink)</button>
+                <button id="btn-test-wled" class="btn btn-secondary" style="padding:6px 14px; font-size:13px;" data-i18n="hw.btn_test_wled">Тестовый кадр (Blink)</button>
                 <span id="wled-test-status" style="font-size:12px; color:var(--text-muted);"></span>
               </div>
             </div>
           </div>
 
           <div class="setting-row">
-            <label>Целевая частота (FPS):</label>
+            <label data-i18n="dash.fps">Целевая частота (FPS):</label>
             <div style="display:flex; align-items:center; gap:12px; flex:1;">
               <input type="range" id="slider-fps" min="15" max="60" value="25" style="flex:1;">
               <span id="val-fps" style="min-width:55px; font-weight:600; font-size:13px; color:var(--text-color);">25 FPS</span>
             </div>
           </div>
           <div class="setting-row">
-            <label>Монитор для захвата:</label>
+            <label data-i18n="zones.monitor">Монитор для захвата:</label>
             <select id="select-monitor">
               <!-- Заполняется автоматически из API -->
             </select>
           </div>
           <div class="setting-row">
-            <label>Порядок цветов (Adalight):</label>
+            <label data-i18n="hw.color_order_title">Порядок цветов (Adalight):</label>
             <select id="select-color-order">
-              <option value="RGB" selected>RGB (По умолчанию)</option>
-              <option value="GRB">GRB (WS2812B ленты)</option>
+              <option value="RGB" selected>RGB</option>
+              <option value="GRB">GRB (WS2812B)</option>
               <option value="BGR">BGR</option>
             </select>
           </div>
           <div class="setting-row">
-            <label>Запуск вместе с Windows:</label>
+            <label data-i18n="dash.autostart">Запуск вместе с Windows:</label>
             <label class="toggle-switch">
               <input type="checkbox" id="toggle-autostart">
               <span class="toggle-slider"></span>
@@ -365,46 +360,46 @@
 
         <div class="card settings-card" style="margin-top: 20px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h2 style="font-size:16px; margin:0;">Горячие клавиши Windows</h2>
+            <h2 style="font-size:16px; margin:0;" data-i18n="hw.hotkeys_title">Горячие клавиши Windows</h2>
             <label class="toggle-switch" title="Включить / отключить глобальные хоткеи">
               <input type="checkbox" id="toggle-hotkeys-enabled" checked>
               <span class="toggle-slider"></span>
             </label>
           </div>
-          <div style="font-size:12px; color:var(--text-muted); margin-bottom:15px;">
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:15px;" data-i18n="hw.hk_press_keys">
             Кликните в поле ввода и нажмите желаемое сочетание клавиш на клавиатуре:
           </div>
           <div class="setting-row">
-            <label>Вкл / Выкл подсветку:</label>
+            <label data-i18n="hw.hk_power">Вкл / Выкл подсветку:</label>
             <div class="hotkey-control-wrap">
-              <input type="text" id="hk-toggle-power" class="input-field hotkey-input" value="Ctrl+Shift+A" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <input type="text" id="hk-toggle-power" class="input-field hotkey-input" value="Ctrl+Shift+A" readonly>
               <button type="button" class="btn-clear-hotkey" data-target="hk-toggle-power" title="Отключить эту клавишу">&times;</button>
             </div>
           </div>
           <div class="setting-row">
-            <label>Увеличить яркость (+10%):</label>
+            <label data-i18n="hw.hk_bright_up">Увеличить яркость (+10%):</label>
             <div class="hotkey-control-wrap">
-              <input type="text" id="hk-brightness-up" class="input-field hotkey-input" value="Ctrl+Shift+Up" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <input type="text" id="hk-brightness-up" class="input-field hotkey-input" value="Ctrl+Shift+Up" readonly>
               <button type="button" class="btn-clear-hotkey" data-target="hk-brightness-up" title="Отключить эту клавишу">&times;</button>
             </div>
           </div>
           <div class="setting-row">
-            <label>Уменьшить яркость (-10%):</label>
+            <label data-i18n="hw.hk_bright_down">Уменьшить яркость (-10%):</label>
             <div class="hotkey-control-wrap">
-              <input type="text" id="hk-brightness-down" class="input-field hotkey-input" value="Ctrl+Shift+Down" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <input type="text" id="hk-brightness-down" class="input-field hotkey-input" value="Ctrl+Shift+Down" readonly>
               <button type="button" class="btn-clear-hotkey" data-target="hk-brightness-down" title="Отключить эту клавишу">&times;</button>
             </div>
           </div>
           <div class="setting-row">
-            <label>Оверлей зон на экране:</label>
+            <label data-i18n="hw.hk_overlay">Оверлей зон на экране:</label>
             <div class="hotkey-control-wrap">
-              <input type="text" id="hk-toggle-overlay" class="input-field hotkey-input" value="Ctrl+Shift+O" readonly title="Кликните и нажмите сочетание клавиш (или Backspace/Delete для отключения)">
+              <input type="text" id="hk-toggle-overlay" class="input-field hotkey-input" value="Ctrl+Shift+O" readonly>
               <button type="button" class="btn-clear-hotkey" data-target="hk-toggle-overlay" title="Отключить эту клавишу">&times;</button>
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
-            <button id="btn-reset-hotkeys" class="btn btn-secondary">Сброс по умолчанию</button>
-            <button id="btn-save-hotkeys" class="btn btn-primary">Сохранить хоткеи</button>
+            <button id="btn-reset-hotkeys" class="btn btn-secondary" data-i18n="hw.hk_btn_reset">Сброс по умолчанию</button>
+            <button id="btn-save-hotkeys" class="btn btn-primary" data-i18n="hw.hk_btn_save">Сохранить хоткеи</button>
           </div>
         </div>
       </section>
@@ -412,34 +407,35 @@
       <!-- Вкладка: Lightpack API -->
       <section id="tab-api" class="tab-pane">
         <header class="content-header">
-          <h1>Lightpack Совместимость</h1>
+          <h1 data-i18n="api.title">Lightpack Совместимость</h1>
         </header>
         <div class="card">
-          <p>Встроенный сервер слушает порт <code>127.0.0.1:3636</code>.</p>
-          <p>Поддерживает плагины Kodi, Prismatik, Home Assistant и Python-скрипты AmbiBox.</p>
+          <p><span data-i18n="api.desc1">Встроенный сервер слушает порт</span> <code>127.0.0.1:3636</code>.</p>
+          <p data-i18n="api.desc2">Поддерживает плагины Kodi, Prismatik, Home Assistant и Python-скрипты AmbiBox.</p>
         </div>
       </section>
+
       <!-- Модальное окно: Сохранение пресета -->
       <div id="modal-preset" class="modal-backdrop" style="display:none;">
         <div class="modal-card" style="max-width: 420px;">
           <div class="modal-header">
-            <h3 id="modal-preset-title">Сохранить пресет</h3>
+            <h3 id="modal-preset-title" data-i18n="preset.modal_title_save">Сохранить пресет</h3>
             <button id="btn-close-preset-modal" class="btn-icon">&times;</button>
           </div>
           <div class="modal-body">
-            <label style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 6px;">Название пресета:</label>
+            <label style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 6px;" data-i18n="preset.name_label">Название пресета:</label>
             <input type="text" id="input-preset-name" placeholder="Например: Кино, Игры, Вечер..." class="input-field" style="width: 100%;">
             <input type="hidden" id="input-preset-id" value="">
           </div>
           <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:8px;">
-            <button id="btn-cancel-preset" class="btn btn-secondary">Отмена</button>
-            <button id="btn-confirm-save-preset" class="btn btn-primary">Сохранить</button>
+            <button id="btn-cancel-preset" class="btn btn-secondary" data-i18n="preset.btn_cancel">Отмена</button>
+            <button id="btn-confirm-save-preset" class="btn btn-primary" data-i18n="preset.btn_save">Сохранить</button>
           </div>
         </div>
       </div>
     </main>
   </div>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
-

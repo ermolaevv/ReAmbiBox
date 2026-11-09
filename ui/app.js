@@ -1,4 +1,64 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // Локализация (i18n)
+  let currentLang = localStorage.getItem('reambibox_lang') || 'ru';
+
+  function t(key, params = {}, defaultText = '') {
+    const dict = (typeof I18N !== 'undefined' && I18N && I18N[currentLang])
+      ? I18N[currentLang]
+      : (typeof I18N !== 'undefined' && I18N && I18N.ru ? I18N.ru : null);
+    let str = (dict && dict[key]) || (typeof I18N !== 'undefined' && I18N && I18N.ru && I18N.ru[key]) || defaultText || null;
+    if (!str) return defaultText || '';
+    for (const [k, v] of Object.entries(params)) {
+      str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), v);
+    }
+    return str;
+  }
+
+  function setLanguage(lang, syncConfig = false) {
+    currentLang = (lang === 'en') ? 'en' : 'ru';
+    localStorage.setItem('reambibox_lang', currentLang);
+    document.documentElement.lang = currentLang;
+
+    const btnRu = document.getElementById('btn-lang-ru');
+    const btnEn = document.getElementById('btn-lang-en');
+    if (btnRu && btnEn) {
+      btnRu.classList.toggle('active', currentLang === 'ru');
+      btnEn.classList.toggle('active', currentLang === 'en');
+    }
+
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      const val = t(key);
+      if (val) el.textContent = val;
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+      const key = el.getAttribute('data-i18n-title');
+      const val = t(key);
+      if (val) el.title = val;
+    });
+
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+      const key = el.getAttribute('data-i18n-placeholder');
+      const val = t(key);
+      if (val) el.placeholder = val;
+    });
+
+    if (currentConfig) {
+      updatePowerButton(currentConfig.is_active);
+      updateOverlayButton(currentConfig.is_overlay_visible);
+      setMode(currentConfig.mode || 'screen', false);
+      renderPresets(currentConfig.presets, currentConfig.active_preset);
+    }
+
+    if (syncConfig) {
+      queueConfigUpdate({ language: currentLang });
+    }
+  }
+
+  document.getElementById('btn-lang-ru')?.addEventListener('click', () => setLanguage('ru', true));
+  document.getElementById('btn-lang-en')?.addEventListener('click', () => setLanguage('en', true));
+
   // Навигация по вкладкам
   const navItems = document.querySelectorAll('.nav-item');
   const tabPanes = document.querySelectorAll('.tab-pane');
@@ -174,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Привязка порога отсечки черного
   sliderBlackThreshold?.addEventListener('input', (e) => {
     const val = parseInt(e.target.value);
-    valBlackThreshold.textContent = val === 0 ? 'Выкл (0)' : val.toString();
+    valBlackThreshold.textContent = val === 0 ? t('dash.black_threshold_off') : val.toString();
     queueConfigUpdate({ black_level_threshold: val });
   });
 
@@ -190,7 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sliderWbR) { sliderWbR.value = 100; valWbR.textContent = '1.00x'; }
     if (sliderWbG) { sliderWbG.value = 100; valWbG.textContent = '1.00x'; }
     if (sliderWbB) { sliderWbB.value = 100; valWbB.textContent = '1.00x'; }
-    if (sliderBlackThreshold) { sliderBlackThreshold.value = 0; valBlackThreshold.textContent = 'Выкл (0)'; }
+    if (sliderBlackThreshold) { sliderBlackThreshold.value = 0; valBlackThreshold.textContent = t('dash.black_threshold_off'); }
     if (sliderSaturation) { sliderSaturation.value = 100; valSaturation.textContent = '100%'; }
 
     queueConfigUpdate({
@@ -222,13 +282,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Кнопка аппаратного сброса / переподключения контроллера
   btnReconnectPort?.addEventListener('click', () => {
-    btnReconnectPort.textContent = 'Сброс...';
+    btnReconnectPort.textContent = t('hw.reconnecting');
     btnReconnectPort.disabled = true;
     queueConfigUpdate({ reconnect: true });
     setTimeout(() => {
-      btnReconnectPort.textContent = 'Сброс / Переподключение';
+      btnReconnectPort.textContent = t('hw.btn_reconnect');
       btnReconnectPort.disabled = false;
-    }, 1500);
+    }, 2000);
   });
 
   // Переключение типа вывода (USB Serial vs WLED Wi-Fi)
@@ -265,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnTestWled?.addEventListener('click', async () => {
     if (!btnTestWled || btnTestWled.disabled) return;
     btnTestWled.disabled = true;
-    btnTestWled.textContent = 'Отправка...';
+    btnTestWled.textContent = t('hw.sending');
     if (wledTestStatus) {
       wledTestStatus.textContent = '';
       wledTestStatus.style.color = 'var(--text-muted)';
@@ -275,26 +335,26 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/wled/test', { method: 'POST' });
       const data = await res.json();
       if (wledTestStatus) {
-        wledTestStatus.textContent = data.message || 'Готово';
+        wledTestStatus.textContent = data.message || 'OK';
         wledTestStatus.style.color = data.status === 'ok' ? '#4ade80' : '#f87171';
       }
     } catch (err) {
       if (wledTestStatus) {
-        wledTestStatus.textContent = 'Ошибка связи с бэкендом';
+        wledTestStatus.textContent = 'Backend error';
         wledTestStatus.style.color = '#f87171';
       }
     } finally {
       setTimeout(() => {
         if (btnTestWled) {
           btnTestWled.disabled = false;
-          btnTestWled.textContent = 'Тестовый кадр (Blink)';
+          btnTestWled.textContent = t('hw.btn_test_wled');
         }
       }, 1000);
     }
   });
 
   // Переключение режимов
-  function setMode(mode) {
+  function setMode(mode, triggerUpdate = true) {
     btnModeScreen?.classList.remove('btn-primary');
     btnModeScreen?.classList.add('btn-secondary');
     btnModeStatic?.classList.remove('btn-primary');
@@ -309,17 +369,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (mode === 'static') {
       btnModeStatic?.classList.remove('btn-secondary');
       btnModeStatic?.classList.add('btn-primary');
-      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Экран';
+      if (btnModeToggle) btnModeToggle.textContent = t('dash.btn_restore_screen');
     } else if (mode === 'music') {
       btnModeMusic?.classList.remove('btn-secondary');
       btnModeMusic?.classList.add('btn-primary');
-      if (btnModeToggle) btnModeToggle.textContent = 'Вернуть: Экран';
+      if (btnModeToggle) btnModeToggle.textContent = t('dash.btn_restore_screen');
     } else {
       btnModeScreen?.classList.remove('btn-secondary');
       btnModeScreen?.classList.add('btn-primary');
-      if (btnModeToggle) btnModeToggle.textContent = 'Тест белым (100% LED)';
+      if (btnModeToggle) btnModeToggle.textContent = t('dash.btn_white_test');
     }
-    queueConfigUpdate({ mode });
+    if (triggerUpdate) queueConfigUpdate({ mode });
   }
 
   btnModeScreen?.addEventListener('click', () => setMode('screen'));
@@ -366,10 +426,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function updatePowerButton(isActive) {
     if (btnPower) {
       if (isActive) {
-        btnPower.textContent = 'Выключить подсветку';
+        btnPower.textContent = t('dash.btn_power_off');
         btnPower.className = 'btn btn-primary';
       } else {
-        btnPower.textContent = 'Включить подсветку';
+        btnPower.textContent = t('dash.btn_power_on');
         btnPower.className = 'btn btn-secondary';
       }
     }
@@ -389,10 +449,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateOverlayButton(isVisible) {
     if (btnToggleOverlay) {
       if (isVisible) {
-        btnToggleOverlay.textContent = 'Скрыть зоны на экране (Оверлей)';
+        btnToggleOverlay.textContent = t('zones.btn_overlay_hide');
         btnToggleOverlay.className = 'btn btn-primary';
       } else {
-        btnToggleOverlay.textContent = 'Показать зоны на экране (Оверлей)';
+        btnToggleOverlay.textContent = t('zones.btn_overlay_show');
         btnToggleOverlay.className = 'btn btn-secondary';
       }
     }
@@ -442,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     try {
-      btnApplyWizard.textContent = 'Применение...';
+      btnApplyWizard.textContent = t('wiz.applying');
       btnApplyWizard.disabled = true;
       await fetch('/api/zones/wizard', {
         method: 'POST',
@@ -454,7 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.error('Ошибка применения мастера:', e);
     } finally {
-      btnApplyWizard.textContent = 'Применить к экрану';
+      btnApplyWizard.textContent = t('wiz.btn_apply');
       btnApplyWizard.disabled = false;
     }
   });
@@ -498,9 +558,9 @@ document.addEventListener('DOMContentLoaded', () => {
   btnSaveZones?.addEventListener('click', () => {
     if (currentConfig && currentConfig.zones) {
       queueConfigUpdate({ zones: currentConfig.zones });
-      btnSaveZones.textContent = 'Сохранено!';
+      btnSaveZones.textContent = t('zones.saved');
       setTimeout(() => {
-        btnSaveZones.textContent = 'Сохранить зоны';
+        btnSaveZones.textContent = t('zones.btn_save');
       }, 1200);
     }
   });
@@ -617,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function openPresetModal(name = '', id = '') {
     if (!modalPreset) return;
     if (modalPresetTitle) {
-      modalPresetTitle.textContent = id ? 'Обновить / переименовать пресет' : 'Сохранить пресет';
+      modalPresetTitle.textContent = id ? t('preset.modal_title_edit') : t('preset.modal_title_save');
     }
     if (inputPresetName) inputPresetName.value = name;
     if (inputPresetId) inputPresetId.value = id;
@@ -654,13 +714,13 @@ document.addEventListener('DOMContentLoaded', () => {
   btnConfirmSavePreset?.addEventListener('click', async () => {
     const name = inputPresetName?.value?.trim();
     if (!name) {
-      alert('Пожалуйста, введите название пресета');
+      alert(t('preset.enter_name_alert'));
       return;
     }
     const id = inputPresetId?.value?.trim() || null;
     try {
       btnConfirmSavePreset.disabled = true;
-      btnConfirmSavePreset.textContent = 'Сохранение...';
+      btnConfirmSavePreset.textContent = t('preset.btn_saving');
       const res = await fetch('/api/presets/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -671,15 +731,15 @@ document.addEventListener('DOMContentLoaded', () => {
         window.__initialized = false;
         await fetchStatus();
       } else {
-        alert('Не удалось сохранить пресет');
+        alert(t('preset.btn_save'));
       }
     } catch (e) {
       console.error('Ошибка сохранения пресета:', e);
-      alert('Ошибка при сохранении пресета');
+      alert(t('preset.btn_save'));
     } finally {
       if (btnConfirmSavePreset) {
         btnConfirmSavePreset.disabled = false;
-        btnConfirmSavePreset.textContent = 'Сохранить';
+        btnConfirmSavePreset.textContent = t('preset.btn_save');
       }
     }
   });
@@ -701,7 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function overwritePreset(preset) {
-    if (!confirm(`Перезаписать пресет "${preset.name}" текущими настройками подсветки?`)) return;
+    if (!confirm(t('preset.overwrite_confirm', { name: preset.name }))) return;
     try {
       const res = await fetch('/api/presets/save', {
         method: 'POST',
@@ -718,7 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function deletePreset(id, name) {
-    if (!confirm(`Удалить пресет "${name}"?`)) return;
+    if (!confirm(t('preset.delete_confirm', { name }))) return;
     try {
       const res = await fetch('/api/presets/delete', {
         method: 'POST',
@@ -740,7 +800,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (activePresetId && Array.isArray(presets)) {
       const active = presets.find(p => p.id === activePresetId);
       if (active && labelActivePreset) {
-        labelActivePreset.textContent = `Активен: ${active.name}`;
+        labelActivePreset.textContent = `${t('dash.active_preset')}: ${active.name}`;
         labelActivePreset.style.display = 'inline-block';
       } else if (labelActivePreset) {
         labelActivePreset.style.display = 'none';
@@ -756,7 +816,7 @@ document.addEventListener('DOMContentLoaded', () => {
       hint.id = 'presets-empty-hint';
       hint.style.fontSize = '13px';
       hint.style.color = 'var(--text-muted)';
-      hint.textContent = 'Нет сохранённых пресетов. Настройте желаемые параметры и нажмите «+ Сохранить текущие как пресет».';
+      hint.textContent = t('dash.presets_empty');
       presetsContainer.appendChild(hint);
       return;
     }
@@ -769,14 +829,14 @@ document.addEventListener('DOMContentLoaded', () => {
       btnName.type = 'button';
       btnName.className = 'preset-name-btn';
       btnName.textContent = p.name;
-      btnName.title = `Применить пресет "${p.name}"`;
+      btnName.title = t('preset.title_apply', { name: p.name });
       btnName.addEventListener('click', () => applyPreset(p.id));
 
       const btnSaveOver = document.createElement('button');
       btnSaveOver.type = 'button';
       btnSaveOver.className = 'btn-chip-action';
       btnSaveOver.innerHTML = '💾';
-      btnSaveOver.title = 'Перезаписать пресет текущими настройками';
+      btnSaveOver.title = t('preset.title_overwrite');
       btnSaveOver.addEventListener('click', (e) => {
         e.stopPropagation();
         overwritePreset(p);
@@ -786,7 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnEdit.type = 'button';
       btnEdit.className = 'btn-chip-action';
       btnEdit.innerHTML = '✏️';
-      btnEdit.title = 'Переименовать пресет';
+      btnEdit.title = t('preset.title_rename');
       btnEdit.addEventListener('click', (e) => {
         e.stopPropagation();
         openPresetModal(p.name, p.id);
@@ -796,7 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnDel.type = 'button';
       btnDel.className = 'btn-chip-action btn-chip-delete';
       btnDel.innerHTML = '&times;';
-      btnDel.title = 'Удалить пресет';
+      btnDel.title = t('preset.title_delete');
       btnDel.addEventListener('click', (e) => {
         e.stopPropagation();
         deletePreset(p.id, p.name);
@@ -821,8 +881,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Обновляем статус в сайдбаре
       if (systemStatus) {
-        const outLabel = data.output_type === 'wled' ? 'WLED' : 'Порт';
-        systemStatus.textContent = `${data.is_active ? 'Активен' : 'Выключен'} | Экран: ${data.capture_fps.toFixed(0)} FPS | ${outLabel}: ${data.serial_fps.toFixed(0)} FPS`;
+        const outLabel = data.output_type === 'wled' ? 'WLED' : t('status.port');
+        const activeLabel = data.is_active ? t('status.active') : t('status.inactive');
+        systemStatus.textContent = `${activeLabel} | ${t('status.screen')}: ${data.capture_fps.toFixed(0)} FPS | ${outLabel}: ${data.serial_fps.toFixed(0)} FPS`;
       }
 
       updatePowerButton(data.is_active);
@@ -833,6 +894,10 @@ document.addEventListener('DOMContentLoaded', () => {
       // Синхронизируем контролы только при первой загрузке
       if (!window.__initialized) {
         window.__initialized = true;
+
+        if (data.language && !localStorage.getItem('reambibox_lang')) {
+          setLanguage(data.language, false);
+        }
 
         if (sliderBrightness) {
           sliderBrightness.value = Math.round(data.brightness * 100);
@@ -888,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ports.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p;
-            opt.textContent = `${p} ${p === data.serial_port ? '(Текущий)' : ''}`;
+            opt.textContent = `${p} ${p === data.serial_port ? t('hw.current_port_suffix') : ''}`;
             if (p === data.serial_port) opt.selected = true;
             selectPort.appendChild(opt);
           });
@@ -900,7 +965,7 @@ document.addEventListener('DOMContentLoaded', () => {
           data.monitors.forEach(m => {
             const opt = document.createElement('option');
             opt.value = m.index;
-            opt.textContent = m.name + (m.is_primary ? ' [Основной]' : '');
+            opt.textContent = m.name + (m.is_primary ? ' [Primary]' : '');
             if (m.index === data.selected_monitor) opt.selected = true;
             selectMonitor.appendChild(opt);
           });
@@ -962,8 +1027,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function setHotkeyDisplay(input, val) {
     if (!input) return;
     const str = (val || '').trim();
-    if (!str || str.toLowerCase() === 'none' || str.toLowerCase() === 'disabled' || str === 'Отключено' || str === 'отключено') {
-      input.value = 'Отключено';
+    if (!str || str.toLowerCase() === 'none' || str.toLowerCase() === 'disabled' || str === 'Отключено' || str === 'отключено' || str === 'Disabled' || str === t('hw.hk_disabled')) {
+      input.value = t('hw.hk_disabled');
       input.classList.add('disabled');
     } else {
       input.value = str;
@@ -975,13 +1040,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.hotkey-input').forEach(input => {
     input.addEventListener('focus', () => {
       input.dataset.oldVal = input.value;
-      input.value = 'Нажмите клавиши...';
+      input.value = t('hw.hk_press_keys');
       input.classList.remove('disabled');
     });
 
     input.addEventListener('blur', () => {
-      if (input.value === 'Нажмите клавиши...') {
-        setHotkeyDisplay(input, input.dataset.oldVal || 'Отключено');
+      if (input.value === t('hw.hk_press_keys')) {
+        setHotkeyDisplay(input, input.dataset.oldVal || t('hw.hk_disabled'));
       }
     });
 
@@ -1041,7 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getHotkeyPayloadValue(id) {
     const val = document.getElementById(id)?.value?.trim() || '';
-    if (!val || val === 'Отключено' || val === 'Нажмите клавиши...') {
+    if (!val || val === 'Отключено' || val === 'Disabled' || val === t('hw.hk_disabled') || val === t('hw.hk_press_keys') || val === 'Нажмите клавиши...') {
       return '';
     }
     return val;
@@ -1056,9 +1121,9 @@ document.addEventListener('DOMContentLoaded', () => {
       toggle_overlay: getHotkeyPayloadValue('hk-toggle-overlay'),
     };
     queueConfigUpdate({ hotkeys });
-    btnSaveHotkeys.textContent = 'Сохранено!';
+    btnSaveHotkeys.textContent = t('hw.saved');
     setTimeout(() => {
-      btnSaveHotkeys.textContent = 'Сохранить хоткеи';
+      btnSaveHotkeys.textContent = t('hw.hk_btn_save');
     }, 1200);
   });
 
@@ -1083,12 +1148,13 @@ document.addEventListener('DOMContentLoaded', () => {
       toggle_overlay: 'Ctrl+Shift+O',
     };
     queueConfigUpdate({ hotkeys });
-    btnResetHotkeys.textContent = 'Сброшено!';
+    btnResetHotkeys.textContent = t('hw.reset_done');
     setTimeout(() => {
-      btnResetHotkeys.textContent = 'Сброс по умолчанию';
+      btnResetHotkeys.textContent = t('hw.hk_btn_reset');
     }, 1200);
   });
 
+  setLanguage(currentLang, false);
   fetchStatus();
   setInterval(fetchStatus, 1000);
 });

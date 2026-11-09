@@ -4,8 +4,10 @@
   --border-color: rgba(255, 255, 255, 0.08);
   --accent-color: #3b82f6;
   --accent-hover: #2563eb;
+  --primary-color: #3b82f6;
   --text-main: #f3f4f6;
   --text-muted: #9ca3af;
+  --text-color: #f3f4f6;
   --success: #10b981;
 }
 
@@ -35,6 +37,29 @@ body {
   display: flex;
   flex-direction: column;
   padding: 24px 16px;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding: 0 2px;
+}
+
+.sidebar-top .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+  padding-left: 0;
+}
+
+.sidebar-top .logo h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-main);
 }
 
 .logo {
@@ -534,4 +559,45 @@ body {
 .btn-chip-delete:hover {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;
+}
+
+/* Переключатель языка (RU / EN) в шапке сайдбара */
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.btn-lang {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  line-height: 1.2;
+}
+
+.btn-lang:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-lang.active {
+  background: var(--accent-color);
+  color: #ffffff;
+  box-shadow: 0 1px 6px rgba(59, 130, 246, 0.45);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
 }

@@ -54,6 +54,8 @@ pub struct AppConfig {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub active_preset: Option<String>,
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default)]
     pub hotkeys: HotkeysConfig,
     pub zones: Vec<Zone>,
@@ -150,6 +152,10 @@ fn default_audio_sensitivity() -> f32 {
     1.0
 }
 
+fn default_language() -> String {
+    "ru".to_string()
+}
+
 fn default_output_type() -> String {
     "serial".to_string()
 }
@@ -202,6 +208,7 @@ impl PartialEq for AppConfig {
             && self.saturation_boost == other.saturation_boost
             && self.presets == other.presets
             && self.active_preset == other.active_preset
+            && self.language == other.language
             && self.hotkeys == other.hotkeys
             && self.zones == other.zones
     }
@@ -239,6 +246,7 @@ impl Default for AppConfig {
             saturation_boost: 1.0,
             presets: Vec::new(),
             active_preset: None,
+            language: default_language(),
             hotkeys: HotkeysConfig::default(),
             zones,
         }
@@ -414,5 +422,22 @@ mod tests {
         assert!(deleted);
         assert!(cfg.presets.is_empty());
         assert_eq!(cfg.active_preset, None);
+    }
+
+    #[test]
+    fn test_language_config() {
+        let mut cfg = AppConfig::default();
+        assert_eq!(cfg.language, "ru");
+
+        cfg.language = "en".to_string();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let deserialized: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.language, "en");
+
+        // Проверка значения по умолчанию при отсутствии поля в старом JSON
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value.as_object_mut().unwrap().remove("language");
+        let without_lang: AppConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(without_lang.language, "ru");
     }
 }

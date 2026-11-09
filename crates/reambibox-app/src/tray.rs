@@ -34,6 +34,8 @@ const ID_MENU_OVERLAY: usize = 2005;
 const ID_MENU_WEBUI: usize = 2002;
 const ID_MENU_AUTOSTART: usize = 2003;
 const ID_MENU_EXIT: usize = 2004;
+const ID_MENU_LANG_RU: usize = 2006;
+const ID_MENU_LANG_EN: usize = 2007;
 const ID_MENU_PRESET_BASE: usize = 3000;
 
 // Идентификаторы глобальных горячих клавиш Windows
@@ -403,15 +405,22 @@ unsafe fn show_context_menu(hwnd: HWND) {
         Err(_) => return,
     };
 
-    let is_active = if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
-        ctx.config.read().is_active
+    let (is_active, is_en) = if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+        let cfg = ctx.config.read();
+        (cfg.is_active, cfg.language.eq_ignore_ascii_case("en"))
     } else {
-        true
+        (true, false)
     };
 
     let is_autostart = crate::autostart::is_autostart_enabled();
 
-    let toggle_text = if is_active {
+    let toggle_text = if is_en {
+        if is_active {
+            w!("Ambient Light: On\tCtrl+Shift+A")
+        } else {
+            w!("Ambient Light: Off\tCtrl+Shift+A")
+        }
+    } else if is_active {
         w!("Подсветка: Включена\tCtrl+Shift+A")
     } else {
         w!("Подсветка: Выключена\tCtrl+Shift+A")
@@ -449,16 +458,52 @@ unsafe fn show_context_menu(hwnd: HWND) {
                 menu,
                 windows::Win32::UI::WindowsAndMessaging::MF_POPUP,
                 preset_menu.0 as usize,
-                w!("Пресеты"),
+                if is_en { w!("Presets") } else { w!("Пресеты") },
             );
         }
     }
 
-    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, w!("Показать зоны на экране\tCtrl+Shift+O"));
-    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, w!("Панель управления (Web UI)..."));
-    let _ = AppendMenuW(menu, autostart_flags, ID_MENU_AUTOSTART, w!("Запуск вместе с Windows"));
+    let overlay_label = if is_en {
+        w!("Show Screen Zones\tCtrl+Shift+O")
+    } else {
+        w!("Показать зоны на экране\tCtrl+Shift+O")
+    };
+    let webui_label = if is_en {
+        w!("Control Panel (Web UI)...")
+    } else {
+        w!("Панель управления (Web UI)...")
+    };
+    let autostart_label = if is_en {
+        w!("Start with Windows")
+    } else {
+        w!("Запуск вместе с Windows")
+    };
+    let exit_label = if is_en {
+        w!("Exit")
+    } else {
+        w!("Выход")
+    };
+
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_OVERLAY, overlay_label);
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_WEBUI, webui_label);
+    let _ = AppendMenuW(menu, autostart_flags, ID_MENU_AUTOSTART, autostart_label);
+
+    // Подменю выбора языка (Language)
+    if let Ok(lang_menu) = CreatePopupMenu() {
+        let ru_flags = if is_en { MF_UNCHECKED } else { MF_CHECKED } | MF_STRING;
+        let en_flags = if is_en { MF_CHECKED } else { MF_UNCHECKED } | MF_STRING;
+        let _ = AppendMenuW(lang_menu, ru_flags, ID_MENU_LANG_RU, w!("Русский (RU)"));
+        let _ = AppendMenuW(lang_menu, en_flags, ID_MENU_LANG_EN, w!("English (EN)"));
+        let _ = AppendMenuW(
+            menu,
+            windows::Win32::UI::WindowsAndMessaging::MF_POPUP,
+            lang_menu.0 as usize,
+            if is_en { w!("Language") } else { w!("Язык (Language)") },
+        );
+    }
+
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_EXIT, w!("Выход"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_MENU_EXIT, exit_label);
 
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
@@ -483,6 +528,22 @@ unsafe fn handle_menu_command(cmd_id: usize) {
                 cfg.is_active = !cfg.is_active;
                 let _ = cfg.save();
                 println!("[Трей] Подсветка переключена: {}", if cfg.is_active { "ВКЛ" } else { "ВЫКЛ" });
+            }
+        }
+        ID_MENU_LANG_RU => {
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                let mut cfg = ctx.config.write();
+                cfg.language = "ru".to_string();
+                let _ = cfg.save();
+                println!("[Трей] Язык переключен: Русский (RU)");
+            }
+        }
+        ID_MENU_LANG_EN => {
+            if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
+                let mut cfg = ctx.config.write();
+                cfg.language = "en".to_string();
+                let _ = cfg.save();
+                println!("[Tray] Language changed: English (EN)");
             }
         }
         ID_MENU_OVERLAY => {
