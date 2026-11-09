@@ -594,18 +594,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match res {
                         Ok(()) => {}
                         Err(reambibox_core::capture::CaptureError::Timeout) => {
-                            // Содержимое экрана не изменилось — пропускаем повторный расчет
+                            // Содержимое экрана не изменилось за таймаут (нормальное поведение DXGI)
                         }
-                        Err(reambibox_core::capture::CaptureError::AccessLost) => {
-                            std::thread::sleep(Duration::from_millis(200));
-                            let _ = cap.reconnect();
-                        }
-                        Err(_) => {
-                            std::thread::sleep(Duration::from_millis(15));
+                        Err(e) => {
+                            // Любая ошибка DXGI (смена сессии при автозапуске, UAC, потеря устройства, InvalidCall)
+                            // требует полного сброса COM-объекта захвата для чистого переподключения
+                            eprintln!("[Capture] Потеря сессии DXGI ({}) — сброс контекста и повторная инициализация...", e);
+                            capture = None;
+                            current_mon = 99999;
+                            std::thread::sleep(Duration::from_millis(300));
+                            continue;
                         }
                     }
 
-                    if frame_captured {
+                    if frame_captured || !last_sampled.is_empty() {
                         // Высокопроизводительное сглаживание по месту, коррекция насыщенности и LUT без промежуточных аллокаций
                         smoother.smooth_into(
                             &last_sampled,

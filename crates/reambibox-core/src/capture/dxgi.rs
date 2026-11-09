@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS};
 use windows::Win32::System::StationsAndDesktops::{
-    OpenInputDesktop, SetThreadDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
+    CloseDesktop, OpenInputDesktop, SetThreadDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
 };
 
 #[derive(Debug, Error)]
@@ -183,12 +183,23 @@ impl DxgiCapture {
     /// Привязка текущего потока к интерактивному рабочему столу
     pub fn attach_to_input_desktop() {
         unsafe {
-            if let Ok(desktop) = OpenInputDesktop(
+            // Запрашиваем стандартные права доступа к рабочему столу (0x01FF),
+            // не требующие административных привилегий, либо GENERIC_ALL
+            let desktop = OpenInputDesktop(
                 DESKTOP_CONTROL_FLAGS(0),
                 false,
-                DESKTOP_ACCESS_FLAGS(0x10000000), // GENERIC_ALL
-            ) {
+                DESKTOP_ACCESS_FLAGS(0x01FF),
+            ).or_else(|_| {
+                OpenInputDesktop(
+                    DESKTOP_CONTROL_FLAGS(0),
+                    false,
+                    DESKTOP_ACCESS_FLAGS(0x10000000),
+                )
+            });
+
+            if let Ok(desktop) = desktop {
                 let _ = SetThreadDesktop(desktop);
+                let _ = CloseDesktop(desktop);
             }
         }
     }
@@ -200,6 +211,7 @@ impl DxgiCapture {
             let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
             let mut current_idx = 0;
             let mut adapter_idx = 0;
+            let mut total_monitors = 0;
 
             while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
                 let mut output_idx = 0;
@@ -209,8 +221,15 @@ impl DxgiCapture {
                     }
                     current_idx += 1;
                     output_idx += 1;
+                    total_monitors += 1;
                 }
                 adapter_idx += 1;
+            }
+
+            // Fallback: если запрошенный монитор временно не найден при загрузке системы,
+            // но есть монитор 0, переключаемся на него
+            if total_monitors > 0 && target_monitor > 0 {
+                return Self::new(0);
             }
 
             Err(CaptureError::MonitorNotFound(target_monitor))
