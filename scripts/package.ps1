@@ -8,7 +8,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $DistDir = Join-Path $RepoRoot "target\dist"
 $PortableDir = Join-Path $DistDir "ReAmbiBox-Portable"
-$Version = "0.1.0"
+$Version = "1.0.0"
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "   ReAmbiBox v$Version — Сборка и упаковка дистрибутива    " -ForegroundColor Cyan

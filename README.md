@@ -5,10 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?logo=windows)](https://github.com/Deus/ReAmbiBox)
 [![Language](https://img.shields.io/badge/Language-Rust%202021-DEA584.svg?logo=rust)](https://www.rust-lang.org/)
-[![Tested on](https://img.shields.io/badge/Tested%20on-Arduino%20(Adalight)%20%7C%2098%20LEDs-brightgreen.svg)]()
+[![Tested on](https://img.shields.io/badge/Tested%20on-Arduino%20(Adalight)%20%7C%2098%20LED-brightgreen.svg)]()
 
-**A lightweight, blazing-fast ambient lighting (Ambilight) engine for modern Windows.**  
-Rewritten from scratch in Rust, inspired by the legendary **AmbiBox**.
+**A lightweight, responsive, and fast ambient lighting service (Ambilight) for modern Windows.**  
+Written from scratch in Rust, spiritually inspired by the legendary **AmbiBox**.
 
 [English](README.md) • [Русский](README.ru.md)
 
@@ -16,118 +16,108 @@ Rewritten from scratch in Rust, inspired by the legendary **AmbiBox**.
 
 ---
 
-## 💡 The Story & Inspiration
+## 💡 Background & Inspiration
 
-Back in the day, **AmbiBox** (version 2.1.7, originally created by Konstantin Granitsa) was the gold standard for DIY ambient PC lighting. It was simple, reliable, and brought desktop setups to life.
+For many years, **AmbiBox** was the go-to tool for DIY ambient lighting behind a monitor.  
+However, the last AmbiBox update came out in **2015**. Since then, Windows has moved on significantly: new WDDM graphics drivers, HDR, high-refresh-rate monitors — and the old screen capture methods built for Windows 7/8 began causing micro-stutters, high CPU usage, and random freezes.
 
-However, AmbiBox received its last update in **2015**. Over the last decade, Windows evolved: modern WDDM display drivers, HDR, high refresh rates, and Windows 10/11 broke older screen capture hooks, leading to micro-stutters, CPU lag, and connection drops.
-
-**ReAmbiBox** was born as a modern, spiritual successor to AmbiBox. We took the beloved core concepts — perimeter zone capture, Adalight protocol compatibility, and Lightpack API integration — and reimagined them on modern technology:
-- **Written in Rust** with memory safety, sub-millisecond execution, and zero garbage collection pauses.
-- **DirectX 11 DXGI Desktop Duplication**: grabs frames straight from the GPU with zero-allocation buffers, keeping CPU usage near 0% even at 60+ FPS.
-- **Clean Web Control Center**: no clunky WinForms or outdated panels — configure everything in a modern, responsive browser UI from any device.
+**ReAmbiBox** is a modern spiritual successor to AmbiBox. The familiar principles have been preserved — perimeter capture, the classic Adalight protocol, and the open Lightpack API server — but everything has been rebuilt on a completely new technology stack:
+- **Written in Rust**: guaranteed memory safety, instant response, and no garbage-collector pauses.
+- **DirectX 11 Direct Capture (DXGI Desktop Duplication)**: frames are read directly from GPU memory with no intermediate copies in RAM. Thanks to the *zero-allocation* architecture, CPU load approaches 0% even at a full 60+ FPS.
+- **Web-based control panel**: no more cluttered legacy UIs — everything is configured right in the browser through a clean, modern web dashboard.
 
 ---
 
-## ⚠️ Hardware Notice (Tested Setup)
+## ⚠️ Hardware Notice (What It Has Been Tested On)
 
 > [!IMPORTANT]
 > **ReAmbiBox was developed and tested exclusively on the author's personal hardware:**
 > - **OS**: Windows 11 Pro (x64)
-> - **Controller**: Arduino Nano / Uno compatible board running the standard **Adalight** firmware
-> - **Connection**: USB Virtual COM-port (`COM10`, `115200` baud)
-> - **LED Strip**: 98 addressable WS2812B LEDs placed along the monitor perimeter (26 top, 25 bottom, 24 left, 23 right, clockwise from bottom-left)
+> - **Controller**: Arduino Nano / Uno with the classic **Adalight** firmware
+> - **Connection**: USB COM port (`COM10`, baud rate `115200`)
+> - **LED strip**: 98 addressable WS2812B LEDs around the monitor perimeter (26 top, 25 bottom, 24 left, 23 right, clockwise from the bottom-left corner)
 >
-> Support for **WLED** (network UDP via DDP & WARLS), higher baud rates (up to 2,000,000 baud), and alternative zone counts was engineered strictly according to protocol specifications. If you have different hardware, your feedback, bug reports, and contributions are very welcome!
+> Support for **WLED** network controllers (Wi-Fi UDP via DDP and WARLS protocols), high baud rates (up to 2 000 000), and other LED configurations is implemented strictly according to official protocol specifications. If you have different hardware — your feedback, bug reports, and pull requests are very welcome!
 
 ---
 
-## ✨ What ReAmbiBox Does
+## ✨ What ReAmbiBox Can Do
 
-### 🎮 Smooth, Real-Time Ambilight (60+ FPS)
-Instead of slow GDI screenshots, ReAmbiBox hooks directly into the DirectX 11 Desktop Duplication subsystem. It samples edge regions in hardware and updates your LEDs with imperceptible latency — perfect for fast-paced shooters, movies, and desktop work.
+### 🎮 Smooth Real-Time Lighting (60+ FPS)
+Instead of slow GDI screenshots, the program uses the DirectX 11 Desktop Duplication API. Screen-edge sampling takes fractions of a millisecond, giving the LEDs a nearly instant reaction in fast-paced games and movies.
 
-### 🎬 Smart Movie Watching (21:9 Letterbox Detection)
-Watching widescreen cinema on a 16:9 monitor? ReAmbiBox automatically detects black bars and shifts its color sampling directly into the active movie area, preventing dark gaps or false colors.
+### 🎬 Smart Movie Mode (21:9 Letterbox Detection)
+Watching a widescreen film on a standard 16:9 monitor? ReAmbiBox detects the black bars at the top and bottom on the fly and shifts the capture zones to the actual image, eliminating dark voids.
 
-### 🛋️ Room & Eye Comfort (Color Calibration)
-- **Gamma Correction (sRGB 2.2 LUT)**: Natural color graduation matched to human eye perception.
-- **White Balance**: Tune Red, Green, and Blue gains so the light matches your wall's paint tone.
-- **Black Level Threshold**: Intelligently dims or shuts off LEDs during dark movie scenes or horror games, eliminating blinding glare when the screen is dark.
-- **Saturation Boost**: Pops vivid, rich colors on your wall even when desktop elements look pale.
-- **Temporal Smoothing**: Smooths transitions so colors flow like liquid light without distracting strobe effects.
+### 🛋️ Eye Comfort & Room Calibration
+- **Gamma Correction (sRGB 2.2 LUT)**: Correct non-linear tone distribution for realistic colour reproduction.
+- **White Balance**: Independent per-channel adjustment of red, green, and blue to match the wall behind your monitor.
+- **Black Level Clipping**: Gently dims the LEDs in dark scenes (0–50), preventing harsh white flashes during night scenes and horror films.
+- **Saturation Boost**: Makes the ambient light vivid and punchy even when the on-screen image is muted.
+- **Temporal Smoothing (EMA)**: Smooth colour transitions with no stroboscopic effect.
 
-### 🎶 Sound to Light (WASAPI Audio Reactive)
-Turn your desk into a music visualizer. Using low-latency Windows audio loopback capture (no virtual cables required), ReAmbiBox analyzes live sound frequencies into:
-- **Beat Pulse**: Rhythmic energy pulses with bass hits.
-- **VU Spectrum**: Classic dynamic frequency equalizer.
-- **Color Wave**: Traveling wave of colors synced to your music tempo.
-
-### 🌐 Clean Browser Control Center (`http://localhost:3637`)
-Everything is managed through a lightweight web interface:
-- **Perimeter Wizard**: Set up your LED count per edge in seconds.
-- **Interactive Drag-and-Drop Editor**: Visually fine-tune, resize, and snap zone boxes directly over your monitor preview.
-- **Presets**: Save separate profiles for Gaming, Cinema, Evening Reading, or Party.
-- **Instant Language Toggle**: Switch between **English** and **Русский** with one click.
+### 🌐 Browser Control Panel (`http://localhost:3637`)
+All controls are gathered in a sleek web interface:
+- **Perimeter Wizard**: Automatic LED placement in just a few clicks.
+- **Interactive Zone Editor**: Drag zones with the mouse, resize them by their corners, and use magnetic edge snapping.
+- **Settings Presets**: Create and save profiles.
 
 ### ⌨️ Global Windows Hotkeys
-Adjust lighting without alt-tabbing out of a full-screen game:
-- `Ctrl + Shift + A` — Toggle lights On / Off
-- `Ctrl + Shift + Up / Down` — Brightness ±10%
-- `Ctrl + Shift + O` — Show on-screen zone overlay
+Control the lighting without leaving fullscreen games:
+- `Ctrl + Shift + A` — Toggle lighting on / off
+- `Ctrl + Shift + Up / Down` — Adjust brightness by ±10%
+- `Ctrl + Shift + O` — Toggle the zone overlay on top of the screen
 
-### 💡 Lightpack & Smart Home Friendly
-Includes a built-in TCP server on port `3636` implementing the standard Lightpack protocol. Works out of the box with **Kodi**, **Home Assistant**, and legacy **AmbiBox** automation scripts.
+### 💡 Open Lightpack API
+A built-in TCP server on port `3636` is fully compatible with the Lightpack protocol. Supports **Kodi** plugins, **Home Assistant** integrations, and legacy Python automation scripts from AmbiBox.
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Quick Start
 
 1. **Download** the latest release from the [Releases](https://github.com/Deus/ReAmbiBox/releases) page:
-   - `ReAmbiBox-Portable-v0.1.0.zip` (portable, no install needed)
-   - Or `ReAmbiBox-Setup-v0.1.0.exe` (installer with autostart)
-2. **Run `reambibox.exe`**. The app silently starts and docks into your System Tray (near the clock).
-3. **Open the Control Panel**: In your browser, open `http://localhost:3637`.
-4. **Select Your Hardware**:
-   - In the **Hardware** tab, pick your Arduino COM-port and baud rate.
-5. **Generate Zones**:
-   - In the **Zone Editor** tab, click **Perimeter Zone Wizard...**, enter your LED counts (e.g., 26 top, 25 bottom, 24 left, 23 right), and click **Apply to Screen**.
-6. That's it! Your ambient lighting is active.
+   - `ReAmbiBox-Portable-v1.0.0.zip` (extract anywhere, no installation required)
+   - Or `ReAmbiBox-Setup-v1.0.0.exe` (classic installer)
+2. **Run `reambibox.exe`**. The app will minimise to the system tray near the clock.
+3. **Open the control panel**: Navigate to `http://localhost:3637` in any browser.
+4. **Set up your connection**:
+   - In the **Hardware** tab, select your Arduino's COM port and baud rate.
+5. **Create zones**:
+   - In the **Zone Editor** tab, click **Screen Perimeter Wizard…**, enter the LED counts per side (e.g. 26 top, 25 bottom, 24 left, 23 right), and click **Apply to Screen**.
+6. Done! Your ambient lighting is live.
 
 ---
 
-## 🛠️ Building from Source
+## 🛠️ Build from Source
 
-If you prefer building ReAmbiBox yourself:
+If you'd like to build the binary yourself:
 
 ```powershell
-# Prerequisites: Rust 1.75+ (MSVC toolchain) and Git on Windows 10/11 x64
+# Requirements: Rust 1.75+ (MSVC toolchain) and Git on Windows 10/11 x64
 git clone https://github.com/Deus/ReAmbiBox.git
 cd ReAmbiBox
 
-# Run automated tests
+# Run tests
 cargo test --workspace
 
-# Build optimized release binary
+# Build the release binary
 cargo build --release --bin reambibox
 
-# Package standalone zip distribution (PowerShell)
+# Package the portable distribution as a zip (PowerShell)
 .\scripts\package.ps1
 ```
 
-The resulting standalone executable will be at `target\release\reambibox.exe`. All web UI files, tray icons, and localization dictionaries are embedded directly into the binary at compile time.
+The final monolithic executable will be at `target\release\reambibox.exe`. All web interface files, the icon, and translation dictionaries are embedded directly into the `.exe` at compile time.
 
 ---
 
-## 🤝 Tribute & Acknowledgments
+## 🤝 Acknowledgements
 
-- **AmbiBox**: Heartfelt appreciation to **Konstantin Granitsa** and the original AmbiBox team (2004–2015) for inspiring an entire generation of DIY ambient lighting projects.
-- **Adalight**: Special thanks to **Adafruit** and the open-source community for the classic serial LED streaming protocol.
+- **AmbiBox**: Huge thanks to the entire original AmbiBox team (2004–2015) for creating the project that inspired thousands of enthusiasts around the world to build their own ambient lighting rigs.
+- **Adalight**: Thanks to the **Adafruit** team and the maker community for the timeless COM-port communication protocol.
 
 ---
 
-## 📄 License
+## 📄 Licence
 
-Distributed under the **MIT License**. See [LICENSE](LICENSE) for details.
-
-Copyright (c) 2026 Vladislav Ermolaev
+This project is distributed under the open and free **MIT** licence. See [LICENSE](LICENSE) for details.

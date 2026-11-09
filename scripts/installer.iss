@@ -1,6 +1,6 @@
 ; Inno Setup 6 Script for ReAmbiBox
 #define MyAppName "ReAmbiBox"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "ReAmbiBox"
 #define MyAppURL "https://github.com/Deus/ReAmbiBox"
 #define MyAppExeName "reambibox.exe"
