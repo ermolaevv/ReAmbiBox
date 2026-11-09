@@ -5,7 +5,9 @@ fn main() {
         res.set("ProductName", "ReAmbiBox");
         res.set("FileDescription", "ReAmbiBox Ambient Backlight Service");
         res.set("LegalCopyright", "Copyright (C) 2026 ReAmbiBox Authors");
-        let _ = res.compile();
+        if let Err(e) = res.compile() {
+            eprintln!("cargo:warning=Failed to compile Windows PE resources: {e}");
+        }
     }
 }
 

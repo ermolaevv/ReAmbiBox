@@ -3,7 +3,7 @@
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "ReAmbiBox"
 #define MyAppURL "https://github.com/Deus/ReAmbiBox"
-#define MyAppExeName "reambibox-app.exe"
+#define MyAppExeName "reambibox.exe"
 
 [Setup]
 AppId={{D37E6148-562F-43B5-A5A4-681961A6394F}
@@ -36,7 +36,6 @@ Name: "autostart"; Description: "Запускать ReAmbiBox вместе с Wi
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\crates\reambibox-app\resources\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

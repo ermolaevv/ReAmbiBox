@@ -6,13 +6,13 @@ use windows::Win32::System::Threading::{
     OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
-/// Завершает любые ранее запущенные экземпляры reambibox-app.exe, гарантируя уникальность процесса в системе
+/// Завершает любые ранее запущенные экземпляры reambibox.exe (или reambibox-app.exe), гарантируя уникальность процесса в системе
 pub fn ensure_single_instance_takeover() {
     let current_pid = std::process::id();
     let current_exe_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()))
-        .unwrap_or_else(|| "reambibox-app.exe".to_string());
+        .unwrap_or_else(|| "reambibox.exe".to_string());
 
     unsafe {
         let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
@@ -33,7 +33,7 @@ pub fn ensure_single_instance_takeover() {
                         .trim_matches(char::from(0))
                         .to_lowercase();
 
-                    if exe_name == current_exe_name || exe_name == "reambibox-app.exe" {
+                    if exe_name == current_exe_name || exe_name == "reambibox.exe" || exe_name == "reambibox-app.exe" {
                         println!("[SingleInstance] Обнаружен предыдущий экземпляр (PID {}). Завершаем...", process_id);
                         if let Ok(h_proc) = OpenProcess(
                             PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,

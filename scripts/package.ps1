@@ -1,4 +1,4 @@
-# PowerShell Package Script for ReAmbiBox
+﻿# PowerShell Package Script for ReAmbiBox
 param(
     [switch]$SkipBuild
 )
@@ -18,11 +18,11 @@ Write-Host "============================================================" -Foreg
 if (-not $SkipBuild) {
     Write-Host "`n>>> [1/4] Компиляция релизной сборки (cargo build --release)..." -ForegroundColor Yellow
     # Завершаем старый запущенный процесс, если он удерживает бинарник
-    Stop-Process -Name "reambibox-app" -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "reambibox", "reambibox-app" -Force -ErrorAction SilentlyContinue
     Push-Location $RepoRoot
     try {
         $cargoCmd = if (Get-Command cargo -ErrorAction SilentlyContinue) { "cargo" } else { "$env:USERPROFILE\.cargo\bin\cargo.exe" }
-        & $cargoCmd build --release --bin reambibox-app
+        & $cargoCmd build --release --bin reambibox
         if ($LASTEXITCODE -ne 0) {
             throw "Ошибка компиляции Cargo"
         }
@@ -31,22 +31,22 @@ if (-not $SkipBuild) {
     }
 }
 
-$ExeSource = Join-Path $RepoRoot "target\release\reambibox-app.exe"
+$ExeSource = Join-Path $RepoRoot "target\release\reambibox.exe"
 if (-not (Test-Path $ExeSource)) {
     throw "Исполняемый файл $ExeSource не найден!"
 }
 
 # 2. Подготовка каталога портативной версии
 Write-Host "`n>>> [2/4] Подготовка файлов портативного релиза..." -ForegroundColor Yellow
-Stop-Process -Name "reambibox-app" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "reambibox", "reambibox-app" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 250
 if (Test-Path $PortableDir) {
     Remove-Item -Recurse -Force $PortableDir
 }
 New-Item -ItemType Directory -Force -Path $PortableDir | Out-Null
 
-Copy-Item -Force $ExeSource (Join-Path $PortableDir "reambibox-app.exe")
-Copy-Item -Force (Join-Path $RepoRoot "crates\reambibox-app\resources\app.ico") (Join-Path $PortableDir "app.ico")
+Copy-Item -Force $ExeSource (Join-Path $PortableDir "reambibox.exe")
+# Иконка уже вшита в сам reambibox.exe (PE-ресурс IDI_ICON1), поэтому app.ico отдельным файлом не требуется
 
 # Создаем краткое руководство README.txt
 $ReadmeLines = @(
@@ -55,7 +55,7 @@ $ReadmeLines = @(
     "============================================================",
     "",
     "БЫСТРЫЙ СТАРТ:",
-    "1. Запустите 'reambibox-app.exe'.",
+    "1. Запустите 'reambibox.exe'.",
     "   Программа свернется в системный трей (значок возле часов).",
     "2. Откройте панель управления в любом браузере: http://localhost:3637",
     "",
@@ -69,10 +69,10 @@ $ReadmeLines = @(
     "  * Esc                     - Сохранить и закрыть оверлей",
     "",
     "ПАРАМЕТРЫ ЗАПУСКА:",
-    "- reambibox-app.exe --minimized   - тихий запуск в трей без открытия окон",
+    "- reambibox.exe --minimized   - тихий запуск в трей без открытия окон",
     "",
     "УНИКАЛЬНОСТЬ ПРОЦЕССА:",
-    "Новый запуск reambibox-app.exe автоматически завершает и замещает старый",
+    "Новый запуск reambibox.exe автоматически завершает и замещает старый",
     "экземпляр, освобождая COM-порт без конфликтов."
 )
 $ReadmeLines | Out-File -FilePath (Join-Path $PortableDir "README.txt") -Encoding UTF8

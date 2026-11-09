@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["ReAmbiBox Authors"]
 description = "ReAmbiBox Application Entry Point"
 
+[[bin]]
+name = "reambibox"
+path = "src/main.rs"
+
 [dependencies]
 reambibox-core = { path = "../reambibox-core" }
 tokio = { version = "1", features = ["full"] }

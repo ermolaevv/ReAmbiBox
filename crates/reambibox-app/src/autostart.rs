@@ -113,10 +113,10 @@ mod tests {
 
     #[test]
     fn test_extract_exe_path() {
-        let cmd_quoted = r#""C:\Program Files\ReAmbiBox\reambibox-app.exe" --minimized"#;
+        let cmd_quoted = r#""C:\Program Files\ReAmbiBox\reambibox.exe" --minimized"#;
         assert_eq!(
             extract_exe_path(cmd_quoted),
-            Some(PathBuf::from(r"C:\Program Files\ReAmbiBox\reambibox-app.exe"))
+            Some(PathBuf::from(r"C:\Program Files\ReAmbiBox\reambibox.exe"))
         );
 
         let cmd_unquoted = r#"C:\Tools\reambibox.exe --silent"#;
