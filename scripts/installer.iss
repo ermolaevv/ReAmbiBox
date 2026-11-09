@@ -27,19 +27,28 @@ PrivilegesRequired=lowest
 CloseApplications=force
 
 [Languages]
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+
+[CustomMessages]
+english.AutostartGroup=Startup:
+english.AutostartTask=Start {#MyAppName} with Windows (minimized to system tray)
+english.WebControlPanelShortcut={#MyAppName} Control Center
+
+russian.AutostartGroup=Автозагрузка:
+russian.AutostartTask=Запускать ReAmbiBox вместе с Windows (в трее)
+russian.WebControlPanelShortcut=Панель управления {#MyAppName}
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Запускать ReAmbiBox вместе с Windows (в трее)"; GroupDescription: "Автозагрузка:"
+Name: "autostart"; Description: "{cm:AutostartTask}"; GroupDescription: "{cm:AutostartGroup}"
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\Панель управления {#MyAppName}"; Filename: "http://localhost:3637"
+Name: "{group}\{cm:WebControlPanelShortcut}"; Filename: "http://localhost:3637"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 

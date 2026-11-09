@@ -1,4 +1,4 @@
-# PowerShell Package Script for ReAmbiBox
+﻿# PowerShell Package Script for ReAmbiBox
 param(
     [switch]$SkipBuild
 )
@@ -109,6 +109,8 @@ foreach ($p in $IsccPaths) {
 
 if ($Iscc) {
     Write-Host "  -> Компиляция Windows инсталлятора через $Iscc..." -ForegroundColor Cyan
+    Stop-Process -Name "ReAmbiBox-Setup*", "*Setup*.tmp" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
     $IssScript = Join-Path $ScriptDir "installer.iss"
     & $Iscc $IssScript
     if ($LASTEXITCODE -eq 0) {
