@@ -76,8 +76,8 @@ A built-in TCP server on port `3636` is fully compatible with the Lightpack prot
 ## 🚀 Quick Start
 
 1. **Download** the latest release from the [Releases](https://github.com/ermolaevv/ReAmbiBox/releases) page:
-   - `ReAmbiBox-Portable-v1.0.0.zip` (extract anywhere, no installation required)
-   - Or `ReAmbiBox-Setup-v1.0.0.exe` (classic installer)
+   - `ReAmbiBox-Portable-v1.0.1.zip` (extract anywhere, no installation required)
+   - Or `ReAmbiBox-Setup-v1.0.1.exe` (classic installer)
 2. **Run `reambibox.exe`**. The app will minimise to the system tray near the clock.
 3. **Open the control panel**: Navigate to `http://localhost:3637` in any browser.
 4. **Set up your connection**:

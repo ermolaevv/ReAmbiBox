@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "reambibox-app"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "parking_lot",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "reambibox-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "crossbeam",
  "serde",
