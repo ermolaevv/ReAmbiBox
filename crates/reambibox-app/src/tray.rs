@@ -69,6 +69,7 @@ pub struct TrayManager {
     is_display_on: Arc<AtomicBool>,
     is_session_unlocked: Arc<AtomicBool>,
     hwnd: parking_lot::Mutex<Option<HWND>>,
+    last_lock_check: Arc<parking_lot::Mutex<std::time::Instant>>,
 }
 
 unsafe impl Send for TrayManager {}
@@ -76,15 +77,58 @@ unsafe impl Sync for TrayManager {}
 
 impl TrayManager {
     pub fn new() -> Self {
+        let initial_locked = is_workstation_locked();
+        if initial_locked {
+            println!("[Сессия] Начальное состояние: экран заблокирован (Lock Screen / вход в систему) — подсветка отключена");
+        }
         Self {
             is_display_on: Arc::new(AtomicBool::new(true)),
-            is_session_unlocked: Arc::new(AtomicBool::new(true)),
+            is_session_unlocked: Arc::new(AtomicBool::new(!initial_locked)),
             hwnd: parking_lot::Mutex::new(None),
+            last_lock_check: Arc::new(parking_lot::Mutex::new(std::time::Instant::now())),
         }
     }
 
     pub fn is_display_active(&self) -> bool {
-        self.is_display_on.load(Ordering::Relaxed) && self.is_session_unlocked.load(Ordering::Relaxed)
+        if !self.is_display_on.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        // Периодическая проверка статуса блокировки (раз в 1 сек).
+        // Защищает от ситуаций, когда процесс стартовал до входа в систему (ARSO),
+        // либо когда экран заблокирован/разблокирован без доставки WTS-сообщения.
+        let mut last_check = self.last_lock_check.lock();
+        if last_check.elapsed() >= std::time::Duration::from_millis(1000) {
+            *last_check = std::time::Instant::now();
+            let locked = is_workstation_locked();
+            let current = self.is_session_unlocked.load(Ordering::Relaxed);
+            if locked && current {
+                println!("[Сессия] Обнаружена блокировка экрана — гасим подсветку");
+                self.is_session_unlocked.store(false, Ordering::Relaxed);
+                return false;
+            } else if !locked && !current {
+                println!("[Сессия] Обнаружена разблокировка экрана — возобновляем подсветку");
+                self.is_session_unlocked.store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+
+        self.is_session_unlocked.load(Ordering::Relaxed)
+    }
+
+    /// Принудительная проверка статуса блокировки (например, при потере сессии DXGI)
+    pub fn force_check_lock_state(&self) -> bool {
+        let locked = is_workstation_locked();
+        let current = self.is_session_unlocked.load(Ordering::Relaxed);
+        if locked && current {
+            println!("[Сессия] Подтверждена блокировка экрана — гасим подсветку");
+            self.is_session_unlocked.store(false, Ordering::Relaxed);
+        } else if !locked && !current {
+            println!("[Сессия] Подтверждена разблокировка экрана — возобновляем подсветку");
+            self.is_session_unlocked.store(true, Ordering::Relaxed);
+        }
+        *self.last_lock_check.lock() = std::time::Instant::now();
+        locked
     }
 
     pub fn reload_hotkeys(&self) {
@@ -217,6 +261,62 @@ impl TrayManager {
     }
 }
 
+/// Проверка, заблокирован ли в данный момент рабочий стол Windows (Lock screen / Winlogon / UAC).
+/// Возвращает `true`, если экран заблокирован или сессия не активна.
+pub fn is_workstation_locked() -> bool {
+    unsafe {
+        use windows::Win32::System::RemoteDesktop::{
+            WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx, WTS_CURRENT_SERVER_HANDLE,
+            WTS_CURRENT_SESSION, WTSINFOEXW,
+        };
+
+        // 1. Пробуем через официальный WTS API сессии
+        let mut buffer: windows::core::PWSTR = windows::core::PWSTR(std::ptr::null_mut());
+        let mut bytes_returned: u32 = 0;
+        if WTSQuerySessionInformationW(
+            WTS_CURRENT_SERVER_HANDLE,
+            WTS_CURRENT_SESSION,
+            WTSSessionInfoEx,
+            &mut buffer,
+            &mut bytes_returned,
+        ).is_ok() && !buffer.0.is_null() {
+            let info = &*(buffer.0 as *const WTSINFOEXW);
+            let locked_opt = if info.Level == 1 {
+                let flags = info.Data.WTSInfoExLevel1.SessionFlags;
+                // WTS_SESSIONSTATE_LOCK = 0, WTS_SESSIONSTATE_UNLOCK = 1, WTS_SESSIONSTATE_UNKNOWN = 0xFFFFFFFF
+                if flags == 0 {
+                    Some(true)
+                } else if flags == 1 {
+                    Some(false)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            WTSFreeMemory(buffer.0 as *mut _);
+
+            if let Some(locked) = locked_opt {
+                return locked;
+            }
+        }
+
+        // 2. Fallback через OpenInputDesktop:
+        // Если станция заблокирована, активным рабочим столом является Winlogon / LogonUI,
+        // к которому у обычного процесса нет прав доступа, и вызов возвращает ошибку (ERROR_ACCESS_DENIED).
+        use windows::Win32::System::StationsAndDesktops::{
+            CloseDesktop, OpenInputDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
+        };
+        match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x0100)) {
+            Ok(desktop) => {
+                let _ = CloseDesktop(desktop);
+                false
+            }
+            Err(_) => true,
+        }
+    }
+}
+
 unsafe extern "system" fn tray_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -267,10 +367,10 @@ unsafe extern "system" fn tray_wnd_proc(
             if let Some(ref ctx) = *GLOBAL_TRAY_CTX.lock() {
                 if event_type == WTS_SESSION_LOCK {
                     ctx.is_session_unlocked.store(false, Ordering::Relaxed);
-                    println!("[Сессия] Рабочая станция заблокирована (Win + L) — гасим подсветку");
+                    println!("[Сессия] Получено уведомление Windows: экран заблокирован (Win + L) — гасим подсветку");
                 } else if event_type == WTS_SESSION_UNLOCK {
                     ctx.is_session_unlocked.store(true, Ordering::Relaxed);
-                    println!("[Сессия] Рабочая станция разблокирована — возобновляем подсветку");
+                    println!("[Сессия] Получено уведомление Windows: экран разблокирован — возобновляем подсветку");
                 }
             }
             LRESULT(0)
@@ -588,5 +688,51 @@ unsafe fn handle_menu_command(cmd_id: usize) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_workstation_locked() {
+        unsafe {
+            use windows::Win32::System::RemoteDesktop::{
+                WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx,
+                WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSINFOEXW,
+            };
+            let mut buffer: windows::core::PWSTR = windows::core::PWSTR(std::ptr::null_mut());
+            let mut bytes_returned: u32 = 0;
+            if WTSQuerySessionInformationW(
+                WTS_CURRENT_SERVER_HANDLE,
+                WTS_CURRENT_SESSION,
+                WTSSessionInfoEx,
+                &mut buffer,
+                &mut bytes_returned,
+            ).is_ok() && !buffer.0.is_null() {
+                let info = &*(buffer.0 as *const WTSINFOEXW);
+                println!("WTS level: {}, SessionFlags: {}", info.Level, info.Data.WTSInfoExLevel1.SessionFlags);
+                WTSFreeMemory(buffer.0 as *mut _);
+            } else {
+                println!("WTS query returned Err or null");
+            }
+
+            use windows::Win32::System::StationsAndDesktops::{
+                CloseDesktop, OpenInputDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
+            };
+            match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x0100)) {
+                Ok(desktop) => {
+                    println!("OpenInputDesktop succeeded");
+                    let _ = CloseDesktop(desktop);
+                }
+                Err(e) => {
+                    println!("OpenInputDesktop failed: {:?}", e);
+                }
+            }
+        }
+
+        let locked = is_workstation_locked();
+        println!("Combined is_workstation_locked(): {}", locked);
     }
 }

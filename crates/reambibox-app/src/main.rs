@@ -500,6 +500,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         out.clear();
                         out.resize(led_count, RgbColor::BLACK);
                     }
+                    if capture.is_some() {
+                        capture = None;
+                        current_mon = 99999;
+                    }
                     std::thread::sleep(Duration::from_millis(50));
                     continue;
                 }
@@ -558,8 +562,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             current_mon = cached_mon_idx;
                         }
                         Err(e) => {
-                            eprintln!("Ошибка инициализации DXGI для монитора {}: {}", cached_mon_idx, e);
-                            std::thread::sleep(Duration::from_millis(500));
+                            // При ошибке создания захвата гасим светодиоды
+                            {
+                                let mut out = colors_ref.write();
+                                out.clear();
+                                out.resize(led_count, RgbColor::BLACK);
+                            }
+                            if tray_ref.force_check_lock_state() {
+                                // Сессия заблокирована (Lock Screen / вход в систему) — тихо ждем
+                                std::thread::sleep(Duration::from_millis(500));
+                            } else {
+                                eprintln!("Ошибка инициализации DXGI для монитора {}: {}", cached_mon_idx, e);
+                                std::thread::sleep(Duration::from_millis(500));
+                            }
                             continue;
                         }
                     }
@@ -599,11 +614,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Содержимое экрана не изменилось за таймаут (нормальное поведение DXGI)
                         }
                         Err(e) => {
-                            // Любая ошибка DXGI (смена сессии при автозапуске, UAC, потеря устройства, InvalidCall)
+                            // Любая ошибка DXGI (смена сессии при блокировке, UAC, потеря устройства, InvalidCall)
                             // требует полного сброса COM-объекта захвата для чистого переподключения
-                            eprintln!("[Capture] Потеря сессии DXGI ({}) — сброс контекста и повторная инициализация...", e);
                             capture = None;
                             current_mon = 99999;
+
+                            // Гасим светодиоды при потере видеопотока
+                            {
+                                let mut out = colors_ref.write();
+                                out.clear();
+                                out.resize(led_count, RgbColor::BLACK);
+                            }
+
+                            if tray_ref.force_check_lock_state() {
+                                eprintln!("[Capture] Экран заблокирован — ожидание разблокировки рабочей станции...");
+                            } else {
+                                eprintln!("[Capture] Потеря сессии DXGI ({}) — сброс контекста и повторная инициализация...", e);
+                            }
+
                             std::thread::sleep(Duration::from_millis(300));
                             continue;
                         }

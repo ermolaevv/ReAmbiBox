@@ -94,7 +94,7 @@
 
 ```powershell
 # Требования: установленный Rust 1.75+ (MSVC тулчейн) и Git на Windows 10/11 x64
-git clone https://github.com/Deus/ReAmbiBox.git
+git clone https://github.com/ermolaevv/ReAmbiBox.git
 cd ReAmbiBox
 
 # Запуск тестов
