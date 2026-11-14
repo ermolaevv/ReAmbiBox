@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?logo=windows)](https://github.com/Deus/ReAmbiBox)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?logo=windows)](https://github.com/ermolaevv/ReAmbiBox)
 [![Language](https://img.shields.io/badge/Language-Rust%202021-DEA584.svg?logo=rust)](https://www.rust-lang.org/)
 [![Tested on](https://img.shields.io/badge/Tested%20on-Arduino%20(Adalight)%20%7C%2098%20LED-brightgreen.svg)]()
 
@@ -75,7 +75,7 @@ A built-in TCP server on port `3636` is fully compatible with the Lightpack prot
 
 ## 🚀 Quick Start
 
-1. **Download** the latest release from the [Releases](https://github.com/Deus/ReAmbiBox/releases) page:
+1. **Download** the latest release from the [Releases](https://github.com/ermolaevv/ReAmbiBox/releases) page:
    - `ReAmbiBox-Portable-v1.0.0.zip` (extract anywhere, no installation required)
    - Or `ReAmbiBox-Setup-v1.0.0.exe` (classic installer)
 2. **Run `reambibox.exe`**. The app will minimise to the system tray near the clock.
@@ -94,7 +94,7 @@ If you'd like to build the binary yourself:
 
 ```powershell
 # Requirements: Rust 1.75+ (MSVC toolchain) and Git on Windows 10/11 x64
-git clone https://github.com/Deus/ReAmbiBox.git
+git clone https://github.com/ermolaevv/ReAmbiBox.git
 cd ReAmbiBox
 
 # Run tests

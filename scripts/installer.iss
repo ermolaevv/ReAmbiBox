@@ -2,7 +2,7 @@
 #define MyAppName "ReAmbiBox"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "ReAmbiBox"
-#define MyAppURL "https://github.com/Deus/ReAmbiBox"
+#define MyAppURL "https://github.com/ermolaevv/ReAmbiBox"
 #define MyAppExeName "reambibox.exe"
 
 [Setup]

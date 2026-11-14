@@ -3,7 +3,7 @@
 <div align="center">
 
 [![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-blue.svg)](LICENSE)
-[![Платформа](https://img.shields.io/badge/Платформа-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?logo=windows)](https://github.com/Deus/ReAmbiBox)
+[![Платформа](https://img.shields.io/badge/Платформа-Windows%2010%20%7C%2011%20(x64)-0078D6.svg?logo=windows)](https://github.com/ermolaevv/ReAmbiBox)
 [![Язык](https://img.shields.io/badge/Язык-Rust%202021-DEA584.svg?logo=rust)](https://www.rust-lang.org/)
 [![Протестировано](https://img.shields.io/badge/Протестировано%20на-Arduino%20(Adalight)%20%7C%2098%20LED-brightgreen.svg)]()
 
@@ -75,7 +75,7 @@
 
 ## 🚀 Быстрый старт
 
-1. **Скачайте** свежую версию на странице [Релизов](https://github.com/Deus/ReAmbiBox/releases):
+1. **Скачайте** свежую версию на странице [Релизов](https://github.com/ermolaevv/ReAmbiBox/releases):
    - `ReAmbiBox-Portable-v1.0.0.zip` (распакуйте в удобное место, установка не требуется)
    - Или `ReAmbiBox-Setup-v1.0.0.exe` (классический установщик)
 2. **Запустите `reambibox.exe`**. Программа свернётся в системный трей возле часов.

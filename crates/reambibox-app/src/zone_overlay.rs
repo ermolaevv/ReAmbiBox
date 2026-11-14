@@ -3,25 +3,26 @@ use reambibox_core::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use windows::core::w;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
     CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
-    InvalidateRect, Rectangle, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
+    InvalidateRect, Rectangle, ScreenToClient, SelectObject, SetBkMode, SetTextColor, UpdateWindow,
     DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
-    HBITMAP, HDC, HGDIOBJ, HRGN, PAINTSTRUCT, PS_SOLID, RDW_ERASE, RDW_INVALIDATE, RDW_UPDATENOW,
+    HBITMAP, HDC, HGDIOBJ, PAINTSTRUCT, PS_SOLID,
     SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetCursorPos, GetMessageW,
     GetSystemMetrics, LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor,
     SetLayeredWindowAttributes, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HTCLIENT,
-    HWND_TOPMOST, IDC_ARROW, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
-    SW_HIDE, SW_SHOW, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
-    WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    HWND_TOPMOST, IDC_ARROW, IDC_SIZENWSE, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    SW_HIDE, SW_SHOW, WM_CAPTURECHANGED, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT,
+    WM_RBUTTONUP, WM_SETCURSOR, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WM_TOGGLE_OVERLAY: u32 = WM_USER + 201;
@@ -144,12 +145,12 @@ impl ZoneOverlayManager {
                 return;
             }
 
-            // Устанавливаем ключевой цвет прозрачности Magenta без конфликтов DWM-альфы
+            // Устанавливаем ключевой цвет прозрачности Magenta и общую альфу для плавного наложения зон
             let _ = SetLayeredWindowAttributes(
                 hwnd,
                 OVERLAY_COLOR_KEY,
-                0,
-                LWA_COLORKEY,
+                225,
+                LWA_COLORKEY | LWA_ALPHA,
             );
 
             *GLOBAL_OVERLAY.lock() = Some(OverlayState {
@@ -303,97 +304,141 @@ unsafe extern "system" fn overlay_wnd_proc(
                     let old_font = SelectObject(mem_dc, h_font);
                     SetBkMode(mem_dc, TRANSPARENT);
 
-                    // 3. Плашка подсказки вверху экрана
+                    // 3. Плашка подсказки (размещаем ниже верхних зон периметра, чтобы не перекрывать их)
                     {
-                        let banner_w = 640;
-                        let banner_h = 36;
+                        let banner_w = 720;
+                        let banner_h = 40;
                         let banner_x = (screen_w - banner_w) / 2;
-                        let banner_y = 16;
+                        // Смещаем ниже верхнего ряда светодиодов (обычно верхняя полоса занимает первые 60-90px)
+                        let banner_y = (screen_h as f32 * 0.12).round().max(90.0) as i32;
                         let rc_banner = RECT {
                             left: banner_x,
                             top: banner_y,
                             right: banner_x + banner_w,
                             bottom: banner_y + banner_h,
                         };
-                        let brush = CreateSolidBrush(COLORREF(0x00151210));
-                        FillRect(mem_dc, &rc_banner, brush);
-                        let _ = DeleteObject(brush);
 
-                        let pen = CreatePen(PS_SOLID, 1, COLORREF(0x00EB8030));
+                        // Тёмно-графитовый фон плашки
+                        let bg_banner = CreateSolidBrush(COLORREF(0x001A1816));
+                        FillRect(mem_dc, &rc_banner, bg_banner);
+                        let _ = DeleteObject(bg_banner);
+
+                        // Оранжевая рамка AmbiBox (BGR: R=0xFA, G=0x8C, B=0x16 -> 0x00168CFA)
+                        let pen = CreatePen(PS_SOLID, 1, COLORREF(0x00168CFA));
                         let old_pen = SelectObject(mem_dc, pen);
+                        let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
+                        let old_brush = SelectObject(mem_dc, null_brush);
                         let _ = Rectangle(mem_dc, banner_x, banner_y, banner_x + banner_w, banner_y + banner_h);
-                        SelectObject(mem_dc, old_pen);
-                        let _ = DeleteObject(pen);
-
-                        SetTextColor(mem_dc, COLORREF(0x00FFFFFF));
-                        let mut text: Vec<u16> = "ReAmbiBox — Настройка зон | Перетаскивайте мышкой | Esc: Сохранить и закрыть\0"
-                            .encode_utf16()
-                            .collect();
-                        let mut rc_text = rc_banner;
-                        DrawTextW(mem_dc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-                    }
-
-                    // 4. Отрисовка всех зон
-                    for zone in &zones {
-                        let is_active = state.active_zone_id == Some(zone.id);
-
-                        let zx = (zone.rect.x * sw_f32).round() as i32;
-                        let zy = (zone.rect.y * sh_f32).round() as i32;
-                        let zw = (zone.rect.width * sw_f32).round().max(16.0) as i32;
-                        let zh = (zone.rect.height * sh_f32).round().max(16.0) as i32;
-
-                        let rc_zone = RECT {
-                            left: zx,
-                            top: zy,
-                            right: zx + zw,
-                            bottom: zy + zh,
-                        };
-
-                        // Рамка зоны: активная — яркий циан (2px), обычные — фиолетовый (1px)
-                        let border_color = if is_active {
-                            COLORREF(0x00FFD700)
-                        } else {
-                            COLORREF(0x00C832D0)
-                        };
-                        let pen = CreatePen(PS_SOLID, if is_active { 2 } else { 1 }, border_color);
-                        let old_pen = SelectObject(mem_dc, pen);
-
-                        let old_brush = SelectObject(mem_dc, windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH));
-                        let _ = Rectangle(mem_dc, zx, zy, zx + zw, zy + zh);
                         SelectObject(mem_dc, old_brush);
                         SelectObject(mem_dc, old_pen);
                         let _ = DeleteObject(pen);
 
-                        // Маркер ресайза в правом нижнем углу активной зоны
-                        if is_active {
-                            let handle_size = 8;
-                            let handle_brush = CreateSolidBrush(COLORREF(0x0000FFFF)); // Желтый
+                        // Мультиязычный читаемый текст подсказки
+                        SetTextColor(mem_dc, COLORREF(0x00FFFFFF));
+                        let is_ru = state.config.read().language.to_lowercase() == "ru";
+                        let text_str = if is_ru {
+                            "ReAmbiBox — Настройка зон | ЛКМ: Выбор и перемещение | ПКМ / Esc: Закрыть [✕]\0"
+                        } else {
+                            "ReAmbiBox — Zone Setup | LMB: Select & Move | RMB / Esc: Close [✕]\0"
+                        };
+                        let mut text: Vec<u16> = text_str.encode_utf16().collect();
+                        let mut rc_text = rc_banner;
+                        DrawTextW(mem_dc, &mut text, &mut rc_text, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    }
+
+                    // 4. Поэтапная отрисовка всех зон:
+                    // Пасс 1 & 2: Заливка фона всех зон (мягкий глубокий синий тон)
+                    // Пасс 3: Рамки всех обычных зон (тонкий #60a5fa 1px поверх всех заливок)
+                    // Пасс 4: Рамка и маркер активной зоны (яркий циан #22d3ee 2px + янтарь #f59e0b)
+                    // Пасс 5: Текст номеров всех зон с контрастными тенями
+                    // Благодаря разделению на пассы заливка ОДНОЙ зоны НИКОГДА не перекрывает рамку соседней!
+
+                    let zone_rects: Vec<(usize, RECT, bool)> = zones
+                        .iter()
+                        .map(|z| {
+                            let zx = (z.rect.x * sw_f32).round() as i32;
+                            let zy = (z.rect.y * sh_f32).round() as i32;
+                            let zw = (z.rect.width * sw_f32).round().max(16.0) as i32;
+                            let zh = (z.rect.height * sh_f32).round().max(16.0) as i32;
+                            let is_active = state.active_zone_id == Some(z.id);
+                            (
+                                z.id,
+                                RECT {
+                                    left: zx,
+                                    top: zy,
+                                    right: zx + zw,
+                                    bottom: zy + zh,
+                                },
+                                is_active,
+                            )
+                        })
+                        .collect();
+
+                    // Пасс 1 & 2: Заливка фона (гарантирует захват мыши DWM по всей площади зоны)
+                    let inactive_fill_brush = CreateSolidBrush(COLORREF(0x003A2214)); // Мягкий полупрозрачный синий
+                    let active_fill_brush = CreateSolidBrush(COLORREF(0x004A3B10));   // Подсвеченный циан
+                    for (_, rc, is_active) in &zone_rects {
+                        FillRect(mem_dc, rc, if *is_active { active_fill_brush } else { inactive_fill_brush });
+                    }
+                    let _ = DeleteObject(inactive_fill_brush);
+                    let _ = DeleteObject(active_fill_brush);
+
+                    // Пасс 3: Отрисовка рамок обычных зон поверх ВСЕХ фонов (небесно-голубой #60a5fa, 1px)
+                    let pen_inactive = CreatePen(PS_SOLID, 1, COLORREF(0x00FAA560));
+                    let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
+                    let old_brush = SelectObject(mem_dc, null_brush);
+                    let old_pen = SelectObject(mem_dc, pen_inactive);
+
+                    for (_, rc, is_active) in &zone_rects {
+                        if !*is_active {
+                            let _ = Rectangle(mem_dc, rc.left, rc.top, rc.right, rc.bottom);
+                        }
+                    }
+
+                    // Пасс 4: Отрисовка рамки и маркера активной зоны поверх всего (неоновый циан #22d3ee, 2px)
+                    let pen_active = CreatePen(PS_SOLID, 2, COLORREF(0x00EED322));
+                    SelectObject(mem_dc, pen_active);
+
+                    for (_, rc, is_active) in &zone_rects {
+                        if *is_active {
+                            let _ = Rectangle(mem_dc, rc.left, rc.top, rc.right, rc.bottom);
+
+                            // Маркер изменения размера в правом нижнем углу (янтарный #f59e0b)
+                            let handle_size = 12;
+                            let handle_brush = CreateSolidBrush(COLORREF(0x000B9EF5));
                             let rc_handle = RECT {
-                                left: zx + zw - handle_size,
-                                top: zy + zh - handle_size,
-                                right: zx + zw,
-                                bottom: zy + zh,
+                                left: rc.right - handle_size,
+                                top: rc.bottom - handle_size,
+                                right: rc.right,
+                                bottom: rc.bottom,
                             };
                             FillRect(mem_dc, &rc_handle, handle_brush);
                             let _ = DeleteObject(handle_brush);
                         }
+                    }
 
-                        // Номер зоны по центру с четкой черной обводкой
-                        let mut num_text: Vec<u16> = format!("{}\0", zone.id + 1).encode_utf16().collect();
+                    SelectObject(mem_dc, old_brush);
+                    SelectObject(mem_dc, old_pen);
+                    let _ = DeleteObject(pen_inactive);
+                    let _ = DeleteObject(pen_active);
+
+                    // Пасс 5: Отрисовка номеров всех зон с четкой черной тенью (100% читаемость)
+                    for (id, rc, is_active) in &zone_rects {
+                        let mut num_text: Vec<u16> = format!("{}\0", id + 1).encode_utf16().collect();
                         SetTextColor(mem_dc, COLORREF(0x00000000));
                         for (dx, dy) in &[(-1, 0), (1, 0), (0, -1), (0, 1)] {
                             let mut rc_shadow = RECT {
-                                left: rc_zone.left + dx,
-                                top: rc_zone.top + dy,
-                                right: rc_zone.right + dx,
-                                bottom: rc_zone.bottom + dy,
+                                left: rc.left + dx,
+                                top: rc.top + dy,
+                                right: rc.right + dx,
+                                bottom: rc.bottom + dy,
                             };
                             let mut num_text_shadow = num_text.clone();
                             DrawTextW(mem_dc, &mut num_text_shadow, &mut rc_shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                         }
 
-                        SetTextColor(mem_dc, if is_active { COLORREF(0x0000FFFF) } else { COLORREF(0x00FFFFFF) });
-                        let mut rc_num = rc_zone;
+                        SetTextColor(mem_dc, if *is_active { COLORREF(0x00EED322) } else { COLORREF(0x00FFFFFF) });
+                        let mut rc_num = *rc;
                         DrawTextW(mem_dc, &mut num_text, &mut rc_num, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                     }
 
@@ -409,111 +454,221 @@ unsafe extern "system" fn overlay_wnd_proc(
             LRESULT(0)
         }
 
+        WM_NCHITTEST => {
+            // Перехватываем мышь по всей площади оверлея, чтобы клики не улетали
+            // в фоновые окна и оверлей не терял фокус
+            LRESULT(HTCLIENT as isize)
+        }
+
         WM_LBUTTONDOWN => {
-            let mouse_x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let mouse_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            // Получаем точные клиентские координаты курсора мыши
+            let (mouse_x, mouse_y) = {
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+                let _ = ScreenToClient(hwnd, &mut pt);
+                (pt.x as f32, pt.y as f32)
+            };
 
-            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
-                let screen_w = state.screen_width as f32;
-                let screen_h = state.screen_height as f32;
+            let mut should_close = false;
+            let mut captured = false;
 
-                let cfg = state.config.read();
-                let mut clicked_zone = None;
-                let mut is_resize = false;
+            {
+                if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                    let screen_w = state.screen_width as f32;
+                    let screen_h = state.screen_height as f32;
 
-                // Ищем зону под курсором (с конца к началу, чтобы верхние брались первыми)
-                for zone in cfg.zones.iter().rev() {
-                    let zx = zone.rect.x * screen_w;
-                    let zy = zone.rect.y * screen_h;
-                    let zw = zone.rect.width * screen_w;
-                    let zh = zone.rect.height * screen_h;
+                    // 1. Проверяем клик по правой части баннера (кнопка [✕])
+                    let banner_w = 720.0;
+                    let banner_h = 40.0;
+                    let banner_x = (screen_w - banner_w) / 2.0;
+                    let banner_y = (screen_h * 0.12).round().max(90.0);
+                    if mouse_x >= banner_x + banner_w - 70.0 && mouse_x <= banner_x + banner_w
+                        && mouse_y >= banner_y && mouse_y <= banner_y + banner_h
+                    {
+                        should_close = true;
+                    }
 
-                    if mouse_x >= zx && mouse_x <= zx + zw && mouse_y >= zy && mouse_y <= zy + zh {
-                        clicked_zone = Some(zone.id);
-                        // Проверяем попадание в правый нижний угол (область 14x14px для ресайза)
-                        if mouse_x >= zx + zw - 14.0 && mouse_y >= zy + zh - 14.0 {
-                            is_resize = true;
+                    if !should_close {
+                        let cfg = state.config.read();
+                        let mut clicked_zone = None;
+                        let mut is_resize = false;
+
+                        // Если зона уже была выбрана, сначала проверяем её (особенно маркер ресайза)
+                        let hit_margin = 4.0;
+                        if let Some(active_id) = state.active_zone_id {
+                            if let Some(zone) = cfg.zones.iter().find(|z| z.id == active_id) {
+                                let zx = zone.rect.x * screen_w;
+                                let zy = zone.rect.y * screen_h;
+                                let zw = (zone.rect.width * screen_w).max(16.0);
+                                let zh = (zone.rect.height * screen_h).max(16.0);
+
+                                if mouse_x >= zx - hit_margin && mouse_x <= zx + zw + hit_margin
+                                    && mouse_y >= zy - hit_margin && mouse_y <= zy + zh + hit_margin
+                                {
+                                    clicked_zone = Some(active_id);
+                                    if mouse_x >= zx + zw - 18.0 && mouse_y >= zy + zh - 18.0 {
+                                        is_resize = true;
+                                    }
+                                    state.drag_offset_x = (mouse_x - zx) / screen_w;
+                                    state.drag_offset_y = (mouse_y - zy) / screen_h;
+                                }
+                            }
                         }
-                        state.drag_offset_x = (mouse_x - zx) / screen_w;
-                        state.drag_offset_y = (mouse_y - zy) / screen_h;
-                        break;
-                    }
-                }
 
-                if let Some(id) = clicked_zone {
-                    state.active_zone_id = Some(id);
-                    if is_resize {
-                        state.is_resizing = true;
-                    } else {
-                        state.is_dragging = true;
+                        // Если клик не в текущую активную зону, ищем среди остальных зон (с конца к началу)
+                        if clicked_zone.is_none() {
+                            for zone in cfg.zones.iter().rev() {
+                                let zx = zone.rect.x * screen_w;
+                                let zy = zone.rect.y * screen_h;
+                                let zw = (zone.rect.width * screen_w).max(16.0);
+                                let zh = (zone.rect.height * screen_h).max(16.0);
+
+                                if mouse_x >= zx - hit_margin && mouse_x <= zx + zw + hit_margin
+                                    && mouse_y >= zy - hit_margin && mouse_y <= zy + zh + hit_margin
+                                {
+                                    clicked_zone = Some(zone.id);
+                                    // Проверяем попадание в правый нижний угол (область 18x18px для ресайза)
+                                    if mouse_x >= zx + zw - 18.0 && mouse_y >= zy + zh - 18.0 {
+                                        is_resize = true;
+                                    }
+                                    state.drag_offset_x = (mouse_x - zx) / screen_w;
+                                    state.drag_offset_y = (mouse_y - zy) / screen_h;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if let Some(id) = clicked_zone {
+                            println!("[Overlay] Захват зоны ID {} (позиция: {:.0}, {:.0}, resize: {})", id, mouse_x, mouse_y, is_resize);
+                            state.active_zone_id = Some(id);
+                            if is_resize {
+                                state.is_resizing = true;
+                            } else {
+                                state.is_dragging = true;
+                            }
+                            captured = true;
+                        } else {
+                            // Клик в пустое место экрана — снимаем выделение активной зоны
+                            state.active_zone_id = None;
+                            state.is_dragging = false;
+                            state.is_resizing = false;
+                        }
                     }
-                    SetCapture(hwnd);
-                    let _ = RedrawWindow(
-                        hwnd,
-                        None,
-                        HRGN(std::ptr::null_mut()),
-                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
-                    );
                 }
+            } // МЬЮТЕКС GLOBAL_OVERLAY ПОЛНОСТЬЮ ОСВОБОЖДЕН ПЕРЕД ЛЮБЫМИ ВЫЗОВАМИ GDI!
+
+            if should_close {
+                if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                    state.is_visible.store(false, Ordering::Relaxed);
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    let _ = state.config.read().save();
+                    println!("[Overlay] Закрытие оверлея по клику на [✕] (настройки сохранены)");
+                }
+                return LRESULT(0);
             }
+
+            if captured {
+                SetCapture(hwnd);
+            }
+
+            // Мгновенная перерисовка без дедлока:
+            let _ = InvalidateRect(hwnd, None, false);
+            let _ = UpdateWindow(hwnd);
             LRESULT(0)
         }
 
         WM_MOUSEMOVE => {
-            let mouse_x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let mouse_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            let (mouse_x, mouse_y) = {
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+                let _ = ScreenToClient(hwnd, &mut pt);
+                (pt.x as f32, pt.y as f32)
+            };
 
-            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
-                if (state.is_dragging || state.is_resizing) && state.active_zone_id.is_some() {
-                    let zone_id = state.active_zone_id.unwrap();
-                    let screen_w = state.screen_width as f32;
-                    let screen_h = state.screen_height as f32;
+            let mut needs_redraw = false;
 
-                    let mut cfg = state.config.write();
-                    if let Some(zone) = cfg.zones.iter_mut().find(|z| z.id == zone_id) {
-                        if state.is_dragging {
-                            // Перемещение зоны
-                            let new_x = ((mouse_x / screen_w) - state.drag_offset_x).clamp(0.0, 1.0 - zone.rect.width);
-                            let new_y = ((mouse_y / screen_h) - state.drag_offset_y).clamp(0.0, 1.0 - zone.rect.height);
-                            zone.rect.x = new_x;
-                            zone.rect.y = new_y;
-                        } else if state.is_resizing {
-                            // Изменение размера
-                            let zx = zone.rect.x * screen_w;
-                            let zy = zone.rect.y * screen_h;
-                            let new_w = ((mouse_x - zx) / screen_w).clamp(0.01, 1.0 - zone.rect.x);
-                            let new_h = ((mouse_y - zy) / screen_h).clamp(0.01, 1.0 - zone.rect.y);
-                            zone.rect.width = new_w;
-                            zone.rect.height = new_h;
+            {
+                if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                    if (state.is_dragging || state.is_resizing) && state.active_zone_id.is_some() {
+                        let zone_id = state.active_zone_id.unwrap();
+                        let screen_w = state.screen_width as f32;
+                        let screen_h = state.screen_height as f32;
+
+                        let mut cfg = state.config.write();
+                        if let Some(zone) = cfg.zones.iter_mut().find(|z| z.id == zone_id) {
+                            if state.is_dragging {
+                                // Перемещение зоны
+                                let new_x = ((mouse_x / screen_w) - state.drag_offset_x).clamp(0.0, 1.0 - zone.rect.width);
+                                let new_y = ((mouse_y / screen_h) - state.drag_offset_y).clamp(0.0, 1.0 - zone.rect.height);
+                                zone.rect.x = new_x;
+                                zone.rect.y = new_y;
+                            } else if state.is_resizing {
+                                // Изменение размера
+                                let zx = zone.rect.x * screen_w;
+                                let zy = zone.rect.y * screen_h;
+                                let new_w = ((mouse_x - zx) / screen_w).clamp(0.01, 1.0 - zone.rect.x);
+                                let new_h = ((mouse_y - zy) / screen_h).clamp(0.01, 1.0 - zone.rect.y);
+                                zone.rect.width = new_w;
+                                zone.rect.height = new_h;
+                            }
                         }
+                        needs_redraw = true;
                     }
-
-                    let _ = RedrawWindow(
-                        hwnd,
-                        None,
-                        HRGN(std::ptr::null_mut()),
-                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
-                    );
                 }
+            } // МЬЮТЕКС GLOBAL_OVERLAY И config.write() ПОЛНОСТЬЮ ОСВОБОЖДЕНЫ!
+
+            if needs_redraw {
+                let _ = InvalidateRect(hwnd, None, false);
+                let _ = UpdateWindow(hwnd);
             }
             LRESULT(0)
         }
 
         WM_LBUTTONUP => {
             let _ = ReleaseCapture();
-            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
-                if state.is_dragging || state.is_resizing {
+            let mut needs_redraw = false;
+
+            {
+                if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                    if state.is_dragging || state.is_resizing {
+                        println!("[Overlay] Положение зоны зафиксировано и сохранено");
+                        state.is_dragging = false;
+                        state.is_resizing = false;
+                        // Сохраняем перемещенные зоны в config.json
+                        let _ = state.config.read().save();
+                        needs_redraw = true;
+                    }
+                }
+            } // МЬЮТЕКС GLOBAL_OVERLAY ОСВОБОЖДЕН!
+
+            if needs_redraw {
+                let _ = InvalidateRect(hwnd, None, false);
+                let _ = UpdateWindow(hwnd);
+            }
+            LRESULT(0)
+        }
+
+        WM_CAPTURECHANGED => {
+            let gaining_hwnd = HWND(lparam.0 as *mut _);
+            if gaining_hwnd != hwnd {
+                if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
                     state.is_dragging = false;
                     state.is_resizing = false;
-                    // Сохраняем перемещенные зоны в config.json
-                    let _ = state.config.read().save();
-                    let _ = RedrawWindow(
-                        hwnd,
-                        None,
-                        HRGN(std::ptr::null_mut()),
-                        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
-                    );
                 }
+            }
+            LRESULT(0)
+        }
+
+        WM_RBUTTONUP => {
+            // Закрытие оверлея по клику правой кнопкой мыши
+            if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
+                state.is_visible.store(false, Ordering::Relaxed);
+                state.is_dragging = false;
+                state.is_resizing = false;
+                state.active_zone_id = None;
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                let _ = state.config.read().save();
+                println!("[Overlay] Закрытие оверлея по клику правой кнопки мыши (настройки сохранены)");
             }
             LRESULT(0)
         }
@@ -521,8 +676,13 @@ unsafe extern "system" fn overlay_wnd_proc(
         WM_SETCURSOR => {
             let hit_test = (lparam.0 & 0xFFFF) as u32;
             if hit_test == HTCLIENT {
-                // Стандартный курсор без зависаний и без значка загрузки
-                let h_cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+                let mut cursor_type = IDC_ARROW;
+                if let Some(ref state) = *GLOBAL_OVERLAY.lock() {
+                    if state.is_resizing {
+                        cursor_type = IDC_SIZENWSE;
+                    }
+                }
+                let h_cursor = LoadCursorW(None, cursor_type).unwrap_or_default();
                 if !h_cursor.0.is_null() {
                     let _ = SetCursor(h_cursor);
                     return LRESULT(1);
@@ -536,6 +696,9 @@ unsafe extern "system" fn overlay_wnd_proc(
                 // Закрытие оверлея по клавише Esc
                 if let Some(ref mut state) = *GLOBAL_OVERLAY.lock() {
                     state.is_visible.store(false, Ordering::Relaxed);
+                    state.is_dragging = false;
+                    state.is_resizing = false;
+                    state.active_zone_id = None;
                     let _ = ShowWindow(hwnd, SW_HIDE);
                     let _ = state.config.read().save();
                     println!("[Overlay] Закрытие оверлея по клавише Esc (настройки сохранены)");
